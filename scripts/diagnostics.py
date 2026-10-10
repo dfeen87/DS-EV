@@ -87,6 +87,8 @@ def main():
     parser.add_argument("--voltage", type=float, help="Override battery voltage (V)")
     parser.add_argument("--soc", type=float, help="Override State of Charge (%%)")
     parser.add_argument("--log-dir", type=str, help="Alternative log directory")
+    parser.add_argument("--config-dir", type=str,
+                        help="Use only this diagnostics configuration and vehicle status directory")
     args = parser.parse_args()
 
     # Determine paths and search directories
@@ -98,6 +100,8 @@ def main():
         "/opt/ds_enhancement/config",
         os.path.join(base_dir, "config")
     ]
+    if args.config_dir:
+        search_dirs = [os.path.abspath(args.config_dir)]
 
     log_paths = [
         "/opt/ds_enhancement/logs/install.log",
@@ -106,7 +110,8 @@ def main():
         "./install.log"
     ]
     if args.log_dir:
-        log_paths.insert(0, os.path.join(args.log_dir, "install.log"))
+        # An explicit destination must keep staged checks out of live logs.
+        log_paths = [os.path.join(args.log_dir, "install.log")]
 
     log_message("=== Starting Pre-Flight Diagnostics ===", log_paths)
 
@@ -155,7 +160,8 @@ def main():
 
     # 3. Read Vehicle Status (Simulated or Real)
     # Priority: /tmp/vehicle_status.json -> config/vehicle_status.json in search dirs
-    status_file = "/tmp/vehicle_status.json"
+    status_file = (os.path.join(os.path.abspath(args.config_dir), "vehicle_status.json")
+                   if args.config_dir else "/tmp/vehicle_status.json")
     if not os.path.exists(status_file):
         status_file = find_file("vehicle_status.json", search_dirs)
     if not status_file:

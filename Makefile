@@ -11,7 +11,7 @@ LOCAL_LOG = logs/install.log
 
 # Logger macro (single-line shell safe)
 define log_action
-	mkdir -p $(INSTALL_DIR)/logs 2>/dev/null || true; mkdir -p logs 2>/dev/null || true; echo "[`date +'%Y-%m-%d %H:%M:%S'`] VERSION: 8.0.1 | ACTION: $(1) | STATUS: $(2) | INFO: $(3)" | tee -a $(LOG_FILE) $(LOCAL_LOG) 2>/dev/null || true
+	mkdir -p $(INSTALL_DIR)/logs 2>/dev/null || true; mkdir -p logs 2>/dev/null || true; echo "[`date +'%Y-%m-%d %H:%M:%S'`] VERSION: 8.0.2 | ACTION: $(1) | STATUS: $(2) | INFO: $(3)" | tee -a $(LOG_FILE) $(LOCAL_LOG) 2>/dev/null || true
 endef
 
 all: help
@@ -24,7 +24,7 @@ help:
 	@echo "  make static-analysis - Run clang-tidy and cppcheck static analyses"
 	@echo "  make diagnostics     - Run pre-flight EV battery diagnostics and safety checks"
 	@echo "  make install         - Backup, compile, and install to /opt/ds_enhancement"
-	@echo "  make update          - Pull updates and safely redeploy via scripts/update.py"
+	@echo "  make update          - Validate authenticated HTTPS updates via scripts/update.py"
 	@echo "  make rollback        - Restore the previous stable version using the last backup"
 	@echo "  make clean           - Clean temporary build outputs"
 	@echo "===================================================================="
@@ -136,7 +136,7 @@ install:
 	@echo "✓ DS Software Suite successfully deployed to $(INSTALL_DIR)."
 	@echo "===================================================================="
 
-# 5. update — pull latest version, re-run safety checks, apply updates
+# 5. update — validate authenticated release, diagnostics, build, and backup before deployment
 update:
 	@# Enforce sudo / root permissions
 	@if [ "$$(id -u)" -ne 0 ]; then \

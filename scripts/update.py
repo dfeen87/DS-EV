@@ -1,269 +1,565 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-DS EV Battery Enhancement - Safe Software Update Utility
-=========================================================
+"""Fail-closed DS-EV software updater.
 
-Handles safe software updates by checking git or fetching from configured URL,
-staging changes, re-running diagnostics, taking a backup, and applying updates.
+An HTTPS release archive is accepted only with an independently provisioned,
+trusted SHA-256 digest. Source, diagnostics, build and verified backup gates all
+precede deployment. Recoverable copy failures attempt a verified restoration;
+file copying is not atomic and cannot guarantee recovery after power loss.
 """
-
-import os
-import sys
+import gzip
+import fcntl
+import hashlib
+import hmac
+import io
 import json
+import math
+import os
+from pathlib import Path, PurePosixPath
+import re
 import shutil
-import tarfile
-import urllib.request
+import socket
+import stat
 import subprocess
+import sys
+import tarfile
 import tempfile
-import platform
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+
+# Import the helper beside this running updater, never the downloaded copy.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import backup_restore
 
 INSTALL_DIR = "/opt/ds_enhancement"
-LOG_FILE = "/opt/ds_enhancement/logs/install.log"
-LOCAL_LOG = "logs/install.log"
+REQUIRED_CONFIGS = ("install_policy.json", "vehicle_status.json", "vehicle_profiles.json",
+                    "safety_thresholds.json", "update_source.json")
+SOURCE_FILES = ("CMakeLists.txt", "scripts/update.py", "scripts/diagnostics.py", "scripts/rollback.sh",
+                "scripts/backup_restore.py", "ds_core/python/ds_enhancer.py",
+                "ds_core/python_fallback/ds_enhancer_fallback.py")
+MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024
+MAX_EXTRACTED_BYTES = 2 * 1024 * 1024 * 1024
 
-def log_message(msg):
-    """Logs to stdout and the installation log files."""
-    print(msg)
-    # Ensure logs directory exists
-    for path in [LOG_FILE, LOCAL_LOG, "./install.log"]:
-        try:
-            dir_name = os.path.dirname(path)
-            if dir_name and not os.path.exists(dir_name):
-                os.makedirs(dir_name, exist_ok=True)
-            with open(path, "a") as f:
-                f.write(f"[{platform.node()}] {msg}\n")
-        except Exception:
-            pass
+
+class UpdateError(RuntimeError):
+    """A mandatory update gate failed; deployment must not succeed."""
+
+
+def log_message(message):
+    # Do not create an installation/log directory before the backup gate.
+    print(message, flush=True)
+
 
 def run_command(cmd, cwd=None):
-    """Helper to run a system command and log it."""
-    log_message(f"Running command: {' '.join(cmd)}")
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=cwd)
-    if result.returncode != 0:
-        log_message(f"Command failed with code {result.returncode}")
-        log_message(f"stdout: {result.stdout}")
-        log_message(f"stderr: {result.stderr}")
-        return False, result.stdout, result.stderr
-    return True, result.stdout, result.stderr
+    try:
+        result = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, timeout=600)
+        return result.returncode == 0, result.stdout, result.stderr
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, "", str(exc)
 
-def find_config(filename):
-    """Resolves config file path."""
-    search_paths = [
-        "config/" + filename,
-        os.path.join(INSTALL_DIR, "config", filename),
-        filename
-    ]
-    for path in search_paths:
-        if os.path.exists(path):
-            return os.path.abspath(path)
-    return None
+
+def _regular_file(path, description):
+    path = Path(path)
+    if path.is_symlink() or not path.is_file():
+        raise UpdateError("Missing or unsafe " + description + ": " + str(path))
+    return path
+
+
+def _trusted_owned_path(path, description):
+    path = Path(path).absolute()
+    if path.resolve() != path:
+        raise UpdateError(description + " contains a symlink/noncanonical component")
+    for component in (path,) + tuple(path.parents):
+        info = component.stat()
+        if info.st_uid != 0 or info.st_mode & 0o022:
+            raise UpdateError(description + " and its parents must be root-owned and protected from other writers")
+
+
+def _https_url(url):
+    if not isinstance(url, str) or not url:
+        raise UpdateError("No HTTPS release source is configured")
+    parsed = urllib.parse.urlsplit(url)
+    if (parsed.scheme.lower() != "https" or not parsed.hostname
+            or parsed.username is not None or parsed.password is not None
+            or parsed.fragment):
+        raise UpdateError("Release source and redirects must use HTTPS without credentials/fragments")
+    return url
+
+
+def load_policy(path):
+    _regular_file(path, "update-source configuration")
+    try:
+        document = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise UpdateError("Invalid update-source configuration: " + str(exc)) from exc
+    policy = document.get("update_policy") if isinstance(document, dict) else None
+    if not isinstance(policy, dict):
+        raise UpdateError("update_policy must be a configuration object")
+    if type(policy.get("prefer_git", False)) is not bool:
+        raise UpdateError("prefer_git must be a boolean")
+    if policy.get("prefer_git", False):
+        raise UpdateError("Git update is disabled: git pull would mutate the active tree before backup")
+    if policy.get("local_mock_source") or policy.get("simulate") or policy.get("test_mode"):
+        raise UpdateError("Simulated/local mock payloads are prohibited in production updates")
+    if policy.get("auto_rollback_on_failure", True) is not True:
+        raise UpdateError("Verified automatic rollback cannot be disabled")
+    _https_url(policy.get("fallback_url"))
+    checksum = policy.get("sha256")
+    if (not isinstance(checksum, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", checksum)
+            or checksum == "0" * 64):
+        raise UpdateError("A trustworthy, independently configured SHA-256 release digest is required")
+    validated = dict(policy)
+    validated["sha256"] = checksum.lower()
+    limits = {"timeout_seconds": (5, 1, 60),
+              "max_download_bytes": (64 * 1024 * 1024, 1, MAX_DOWNLOAD_BYTES),
+              "max_extracted_bytes": (256 * 1024 * 1024, 1, MAX_EXTRACTED_BYTES),
+              "max_archive_members": (10000, 1, 100000)}
+    for name, (default, lower, upper) in limits.items():
+        value = policy.get(name, default)
+        if type(value) is not int or not lower <= value <= upper:
+            raise UpdateError("Invalid bounded update setting: " + name)
+        validated[name] = value
+    return validated
+
+
+class HTTPSOnlyRedirect(urllib.request.HTTPRedirectHandler):
+    def __init__(self, deadline=None):
+        self.deadline = deadline
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _https_url(newurl)  # Validate before urllib opens the redirected transport.
+        if self.deadline is not None:
+            remaining = self.deadline - time.monotonic()
+            if remaining <= 0:
+                raise UpdateError("Release download timed out during redirect")
+            req.timeout = remaining
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def download_archive(policy, destination, opener=None):
+    """Download bounded bytes with TLS verification and a configured digest."""
+    url = _https_url(policy.get("fallback_url"))
+    digest_expected = policy.get("sha256")
+    if (not isinstance(digest_expected, str)
+            or not re.fullmatch(r"[0-9a-fA-F]{64}", digest_expected)
+            or digest_expected == "0" * 64):
+        raise UpdateError("A trustworthy SHA-256 release digest is required before download")
+    timeout = policy.get("timeout_seconds", 5)
+    maximum = policy.get("max_download_bytes", 64 * 1024 * 1024)
+    if type(timeout) is not int or not 1 <= timeout <= 60 or type(maximum) is not int or not 1 <= maximum <= MAX_DOWNLOAD_BYTES:
+        raise UpdateError("Invalid download limits")
+    deadline = time.monotonic() + timeout
+    opener = opener or urllib.request.build_opener(HTTPSOnlyRedirect(deadline))
+    open_request = opener.open if hasattr(opener, "open") else opener
+    request = urllib.request.Request(url, headers={"User-Agent": "DS-EV-updater/8.0.2",
+                                                  "Accept-Encoding": "identity"})
+    destination = Path(destination)
+    try:
+        with open_request(request, timeout=timeout) as response:
+            _https_url(response.geturl())
+            status = getattr(response, "status", 200)
+            if status != 200:
+                raise UpdateError("Release asset is unavailable (HTTP " + str(status) + ")")
+            length = response.headers.get("Content-Length")
+            if length is not None:
+                if not str(length).isdigit() or int(length) > maximum:
+                    raise UpdateError("Release payload has an invalid or oversized Content-Length")
+            digest = hashlib.sha256()
+            total = 0
+            with destination.open("xb") as output:
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise UpdateError("Release download timed out")
+                    # urllib's timeout bounds connect/read operations. Bound the
+                    # aggregate deadline as well, adjusting CPython's socket
+                    # budget to the remaining time when available.
+                    sock = getattr(getattr(getattr(response, "fp", None), "raw", None), "_sock", None)
+                    if sock is not None:
+                        sock.settimeout(remaining)
+                    # read1 returns available bytes rather than trying to fill
+                    # a large buffer forever under a slow byte trickle.
+                    read_block = getattr(response, "read1", response.read)
+                    block = read_block(min(65536, maximum - total + 1))
+                    if time.monotonic() > deadline:
+                        raise UpdateError("Release download timed out")
+                    if not block:
+                        break
+                    total += len(block)
+                    if total > maximum:
+                        raise UpdateError("Release payload exceeds the download size limit")
+                    digest.update(block)
+                    output.write(block)
+            if not total or (length is not None and total != int(length)):
+                raise UpdateError("Release payload is empty or truncated")
+            if not hmac.compare_digest(digest.hexdigest(), digest_expected.lower()):
+                raise UpdateError("Release payload SHA-256 checksum mismatch")
+    except urllib.error.HTTPError as exc:
+        raise UpdateError("Release asset is unavailable (HTTP " + str(exc.code) + "); no fallback is permitted") from exc
+    except (urllib.error.URLError, TimeoutError, socket.timeout, OSError) as exc:
+        raise UpdateError("Release download failed: " + str(exc)) from exc
+    except UpdateError:
+        raise
+    return destination
+
+
+class _LimitedReader:
+    """Cap all gzip-expanded tar bytes, including metadata and padding."""
+    def __init__(self, source, maximum):
+        self.source = source
+        self.maximum = maximum
+        self.total = 0
+
+    def read(self, size=-1):
+        if size < 0:
+            size = self.maximum - self.total + 1
+        block = self.source.read(min(size, self.maximum - self.total + 1))
+        self.total += len(block)
+        if self.total > self.maximum:
+            raise UpdateError("Archive exceeds the expanded size limit")
+        return block
+
+
+def _member_name(member):
+    raw = member.name
+    path = PurePosixPath(raw)
+    if (not raw or "\\" in raw or "\x00" in raw or path.is_absolute()
+            or ".." in path.parts or re.match(r"^[A-Za-z]:", raw)):
+        raise UpdateError("Unsafe archive path: " + repr(raw))
+    name = path.as_posix()
+    if name == ".":
+        if member.type != tarfile.DIRTYPE:
+            raise UpdateError("Invalid archive root member")
+        return None
+    if member.type not in (tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.DIRTYPE) or member.sparse is not None:
+        raise UpdateError("Unsafe link or unsupported archive member: " + name)
+    if member.mode & 0o7000:
+        raise UpdateError("Privileged archive permissions are prohibited: " + name)
+    return name
+
+
+def _scan_archive(archive_path, max_bytes, max_members, destination=None):
+    names = {}
+    required_directories = set()
+    count = 0
+    with gzip.open(archive_path, "rb") as expanded:
+        limited = _LimitedReader(expanded, max_bytes)
+        with tarfile.open(fileobj=limited, mode="r|") as archive:
+            for member in archive:
+                count += 1
+                if count > max_members:
+                    raise UpdateError("Archive exceeds the member count limit")
+                name = _member_name(member)
+                if name is None:
+                    continue
+                if name in names:
+                    raise UpdateError("Duplicate archive member: " + name)
+                parts = PurePosixPath(name).parts
+                for index in range(1, len(parts)):
+                    parent = "/".join(parts[:index])
+                    if names.get(parent) == "file":
+                        raise UpdateError("Archive file/directory collision: " + name)
+                    required_directories.add(parent)
+                kind = "directory" if member.type == tarfile.DIRTYPE else "file"
+                if kind == "file" and name in required_directories:
+                    raise UpdateError("Archive file/directory collision: " + name)
+                names[name] = kind
+                if member.size < 0 or member.size > max_bytes:
+                    raise UpdateError("Invalid/oversized archive member: " + name)
+                if destination is not None:
+                    target = Path(destination).joinpath(*parts)
+                    if kind == "directory":
+                        target.mkdir(parents=True, exist_ok=True)
+                    else:
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        source = archive.extractfile(member)
+                        if source is None:
+                            raise UpdateError("Unreadable archive member: " + name)
+                        with source, target.open("xb") as output:
+                            shutil.copyfileobj(source, output, length=65536)
+                        target.chmod(0o755 if member.mode & 0o111 else 0o644)
+        # Consume gzip footer/trailing blocks to check CRC/truncation even when
+        # tar iteration has reached its end marker.
+        while limited.read(65536):
+            pass
+    if not names:
+        raise UpdateError("Archive contains no release files")
+    return names
+
+
+def extract_archive(archive_path, stage_dir, max_bytes=256 * 1024 * 1024, max_members=10000):
+    """Validate the complete archive before writing any staged member."""
+    if (type(max_bytes) is not int or not 1 <= max_bytes <= MAX_EXTRACTED_BYTES
+            or type(max_members) is not int or not 1 <= max_members <= 100000):
+        raise UpdateError("Invalid archive limits")
+    destination = Path(stage_dir)
+    if destination.is_symlink() or (destination.exists() and any(destination.iterdir())):
+        raise UpdateError("Staging must be an empty independent directory")
+    try:
+        _scan_archive(archive_path, max_bytes, max_members)
+        destination.mkdir(parents=True, exist_ok=True, mode=0o700)
+        _scan_archive(archive_path, max_bytes, max_members, destination)
+    except (tarfile.TarError, EOFError, OSError, ValueError) as exc:
+        raise UpdateError("Invalid/corrupt release archive: " + str(exc)) from exc
+    return destination
+
+
+def _validate_configs(root):
+    root = Path(root)
+    keys = {"install_policy.json": "install_policy", "vehicle_profiles.json": "supported_vehicles",
+            "safety_thresholds.json": "safety_thresholds", "update_source.json": "update_policy"}
+    for name in REQUIRED_CONFIGS:
+        path = _regular_file(root / "config" / name, "required diagnostics configuration")
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise UpdateError("Invalid configuration " + name + ": " + str(exc)) from exc
+        if not isinstance(document, dict) or (name in keys and not isinstance(document.get(keys[name]), dict)):
+            raise UpdateError("Invalid configuration structure: " + name)
+        if name in keys and name != "update_source.json" and not document[keys[name]]:
+            raise UpdateError("Required configuration is empty: " + name)
+        if name == "vehicle_status.json":
+            if not all(isinstance(document.get(field), str) and document[field]
+                       for field in ("model", "firmware_version")):
+                raise UpdateError("Required vehicle model/firmware evidence is missing")
+            for field in ("battery_soh", "temperature_c", "voltage_v", "soc"):
+                value = document.get(field)
+                if type(value) not in (int, float) or not math.isfinite(value):
+                    raise UpdateError("Required finite vehicle evidence is missing: " + field)
+
+
+def _validate_source(stage):
+    for name in SOURCE_FILES:
+        _regular_file(stage / name, "required release file")
+    _validate_configs(stage)
+    docs = stage / "docs"
+    if docs.is_symlink() or not docs.is_dir() or not list(docs.glob("*.md")):
+        raise UpdateError("Release documentation is missing")
+
+
+def _check_command(runner, command, cwd, gate, logger):
+    try:
+        ok, stdout, stderr = runner([str(part) for part in command], cwd=str(cwd))
+    except Exception as exc:
+        raise UpdateError(gate + " failed: " + str(exc)) from exc
+    if not ok:
+        logger(gate + " output: " + (stderr or stdout or "no output"))
+        raise UpdateError(gate + " failed")
+    return stdout, stderr
+
+
+def _prepare_deployment(stage, destination, active_config=None):
+    cli = _regular_file(stage / "ds_core/bin/ds_enhancer", "compiled CLI")
+    if not cli.stat().st_size or not os.access(cli, os.X_OK):
+        raise UpdateError("Compiled CLI is empty or not executable")
+    library_dir = stage / "ds_core/lib"
+    if library_dir.is_symlink() or not library_dir.is_dir():
+        raise UpdateError("Compiled shared library directory is missing")
+    libraries = list(library_dir.glob("libds_enhancer.*"))
+    if not libraries:
+        raise UpdateError("Compiled shared library is missing")
+    for library in libraries:
+        _regular_file(library, "compiled shared library")
+        if not library.stat().st_size:
+            raise UpdateError("Compiled shared library is empty")
+    destination.mkdir()
+    (destination / "bin").mkdir()
+    shutil.copy2(cli, destination / "bin/ds_enhancer")
+    for script in (stage / "scripts").iterdir():
+        if script.suffix in (".py", ".sh"):
+            _regular_file(script, "release script")
+            target = destination / "bin" / script.name
+            shutil.copy2(script, target)
+            target.chmod(0o755)
+    shutil.copytree(library_dir, destination / "lib", symlinks=True)
+    for source, name in ((stage / "ds_core/python", "python"),
+                         (stage / "ds_core/python_fallback", "python_fallback"),
+                         (active_config or stage / "config", "config"), (stage / "docs", "docs")):
+        shutil.copytree(source, destination / name, symlinks=True)
+    expected = backup_restore.tree_manifest(destination)
+    if not expected:
+        raise UpdateError("Prepared deployment is empty")
+    return expected
+
+
+def deploy_tree(stage, install):
+    """Replace managed software directories after all validation/backup gates."""
+    install = Path(install)
+    if install.is_symlink():
+        raise UpdateError("Installation root is a symlink")
+    install.mkdir(parents=True, exist_ok=True)
+    for name in backup_restore.MANAGED_DIRS:
+        target = install / name
+        if os.path.lexists(target):
+            if target.is_symlink() or not target.is_dir():
+                raise UpdateError("Unsafe deployment target: " + str(target))
+            shutil.rmtree(target)
+        shutil.copytree(Path(stage) / name, target, symlinks=True)
+
+
+def _run_update_locked(install_dir=None, source_dir=None, config_path=None, *, runner=None,
+               opener=None, logger=None, require_root=True, which=None, deployer=None):
+    """Return zero only after genuine validated deployment; injectable for tests."""
+    install = Path(install_dir or INSTALL_DIR).absolute()
+    source = Path(source_dir or Path(__file__).resolve().parent.parent).absolute()
+    config = Path(config_path) if config_path is not None else (
+        install / "config/update_source.json" if install.exists() else source / "config/update_source.json")
+    runner = runner or run_command
+    logger = logger or log_message
+    which = which or shutil.which
+    deployer = deployer or deploy_tree
+    logger("=== Initiating fail-closed software update ===")
+    mutated = False
+    try:
+        if require_root and os.geteuid() != 0:
+            raise UpdateError("Update requires root privileges")
+        if install.resolve() != install or install.is_symlink() or (install.exists() and not install.is_dir()):
+            raise UpdateError("Installation root is unsafe")
+        if not install.is_dir():
+            raise UpdateError("No existing installation is available; updater cannot deploy without a viable backup")
+        if require_root:
+            _trusted_owned_path(config, "Release digest configuration")
+        policy = load_policy(config)
+        for name in ("cmake", "ctest", "bash", "python3"):
+            if not which(name):
+                raise UpdateError("Required command is missing: " + name)
+        if not any(which(name) for name in ("c++", "g++", "clang++")):
+            raise UpdateError("Required C++ compiler is missing")
+        interpreter = _regular_file(Path(sys.executable).resolve(), "Python executable")
+        if not os.access(interpreter, os.X_OK):
+            raise UpdateError("Python interpreter is not executable")
+        active = install
+        diagnostics = _regular_file(active / "bin/diagnostics.py",
+                                    "current diagnostics")
+        _validate_configs(active)
+        if require_root:
+            _trusted_owned_path(diagnostics, "Current diagnostics")
+            for name in REQUIRED_CONFIGS:
+                _trusted_owned_path(active / "config" / name, "Current diagnostics configuration")
+        tool_dir = source / "scripts" if (source / "scripts").is_dir() else source / "bin"
+        rollback = _regular_file(tool_dir / "rollback.sh", "backup/rollback command")
+        helper = _regular_file(tool_dir / "backup_restore.py", "verified backup helper")
+        if require_root:
+            for tool in (rollback, helper):
+                _trusted_owned_path(tool, "Backup/rollback helper")
+        original = backup_restore.tree_manifest(install)
+        with tempfile.TemporaryDirectory(prefix="ds-ev-update-") as temporary:
+            temporary = Path(temporary)
+            trusted_tools = temporary / "trusted-tools"
+            trusted_tools.mkdir()
+            shutil.copy2(rollback, trusted_tools / "rollback.sh")
+            shutil.copy2(helper, trusted_tools / "backup_restore.py")
+            # Stage/deployed diagnostics use copied current vehicle evidence.
+            # Current diagnostics retain their existing evidence semantics for
+            # compatibility with previously installed diagnostic scripts.
+            context = temporary / "diagnostics-context"
+            context.mkdir()
+            for name in REQUIRED_CONFIGS:
+                shutil.copy2(active / "config" / name, context / name)
+            _check_command(runner, [sys.executable, diagnostics, "--log-dir", temporary / "current-logs"],
+                           context, "Current diagnostics", logger)
+            archive = temporary / "payload.tar.gz"
+            download_archive(policy, archive, opener=opener)
+            logger("Authenticated release archive downloaded and SHA-256 verified")
+            stage = extract_archive(archive, temporary / "staging",
+                                    policy["max_extracted_bytes"], policy["max_archive_members"])
+            _validate_source(stage)
+            _check_command(runner, [sys.executable, stage / "scripts/diagnostics.py", "--config-dir", context, "--log-dir", temporary / "staged-logs"],
+                           context, "Staged diagnostics", logger)
+            for generated in (stage / "build", stage / "ds_core/bin", stage / "ds_core/lib"):
+                if generated.exists():
+                    shutil.rmtree(generated)
+            _check_command(runner, ["cmake", "-S", stage, "-B", stage / "build", "-DCMAKE_BUILD_TYPE=Release",
+                                   "-DDS_BUILD_TESTS=ON"], stage, "Staged CMake configuration", logger)
+            _check_command(runner, ["cmake", "--build", stage / "build", "--parallel", "2"],
+                           stage, "Staged build (active installation unchanged; rollback unnecessary)", logger)
+            test_listing, _ = _check_command(runner, ["ctest", "-N"], stage / "build",
+                                             "Staged test discovery", logger)
+            count = re.search(r"Total Tests:\s*(\d+)", test_listing)
+            if count is None or int(count.group(1)) == 0:
+                raise UpdateError("Staged test discovery found no required tests")
+            _check_command(runner, ["ctest", "--output-on-failure"], stage / "build",
+                           "Staged tests", logger)
+            layout = temporary / "deployment"
+            expected = _prepare_deployment(stage, layout, active / "config")
+            snapshot_id = uuid.uuid4().hex
+            snapshot = install / "backups" / snapshot_id
+            rollback_command = ["bash", trusted_tools / "rollback.sh"]
+            rollback_options = ["--install-dir", install, "--backup-dir", install / "backups", "--snapshot-id", snapshot_id]
+            _check_command(runner, rollback_command + ["backup"] + rollback_options,
+                           trusted_tools, "Required backup", logger)
+            backup_restore.verify_backup(snapshot, original)
+            if backup_restore.tree_manifest(install) != original:
+                raise UpdateError("Active installation changed before deployment; update blocked")
+            logger("Backup independently verified against current software")
+            try:
+                mutated = True  # Copying can partially mutate before raising.
+                deployer(layout, install)
+                if backup_restore.tree_manifest(install) != expected:
+                    raise UpdateError("Deployed files failed verification")
+                _check_command(runner, [sys.executable, install / "bin/diagnostics.py", "--config-dir", context, "--log-dir", temporary / "deployed-logs"],
+                               context, "Post-deployment diagnostics", logger)
+                if backup_restore.tree_manifest(install) != expected:
+                    raise UpdateError("Deployed software changed during diagnostics")
+            except Exception as exc:
+                logger("CRITICAL: Deployment failed: " + str(exc))
+                try:
+                    backup_restore.verify_backup(snapshot, original)
+                    _check_command(runner, rollback_command + ["restore"] + rollback_options,
+                                   trusted_tools, "Rollback command", logger)
+                    if backup_restore.tree_manifest(install) != original:
+                        raise UpdateError("Restored installation differs from the pre-update snapshot")
+                    logger("RESTORATION VERIFIED: original software restored; update failed")
+                except Exception as restore_error:
+                    logger("RESTORATION FAILED: " + str(restore_error) + "; manual recovery required")
+                return 1
+            logger("SUCCESS: Genuine authenticated software update deployed and verified")
+            return 0
+    except (UpdateError, backup_restore.BackupError, OSError, ValueError) as exc:
+        logger("CRITICAL: Update blocked: " + str(exc))
+        if not mutated:
+            logger("No software deployment was performed")
+        return 1
+
+
+def run_update(install_dir=None, source_dir=None, config_path=None, *, runner=None,
+               opener=None, logger=None, require_root=True, which=None, deployer=None):
+    """Serialize updaters using a lock outside replaced software directories."""
+    install = Path(install_dir or INSTALL_DIR).absolute()
+    logger = logger or log_message
+    lock_fd = None
+    try:
+        if require_root and os.geteuid() != 0:
+            raise UpdateError("Update requires root privileges")
+        if install.resolve() != install:
+            raise UpdateError("Installation path contains a symlink or noncanonical component")
+        lock_path = install.parent / ("." + install.name + ".update.lock")
+        lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        info = os.fstat(lock_fd)
+        if not stat.S_ISREG(info.st_mode) or (require_root and (info.st_uid != 0 or info.st_mode & 0o022)):
+            raise UpdateError("Unsafe updater lock file")
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise UpdateError("Another updater is active; deployment blocked") from exc
+        return _run_update_locked(install, source_dir, config_path, runner=runner,
+                                  opener=opener, logger=logger, require_root=require_root,
+                                  which=which, deployer=deployer)
+    except (UpdateError, OSError) as exc:
+        logger("CRITICAL: Update blocked: " + str(exc))
+        return 1
+    finally:
+        if lock_fd is not None:
+            os.close(lock_fd)
+
 
 def main():
-    log_message("=== Initiating Safe Update Process ===")
+    return run_update()
 
-    # 1. Check Root Privileges
-    if os.geteuid() != 0:
-        log_message("CRITICAL: Update utility must be run with sudo or root privileges.")
-        sys.exit(1)
-
-    # 2. Re-run Pre-flight Diagnostics first to ensure current vehicle is stable
-    log_message("Running pre-update diagnostics on active vehicle...")
-    diag_script = "scripts/diagnostics.py" if os.path.exists("scripts/diagnostics.py") else os.path.join(INSTALL_DIR, "bin/diagnostics.py")
-    if os.path.exists(diag_script):
-        ok, _, _ = run_command([sys.executable, diag_script])
-        if not ok:
-            log_message("CRITICAL: Active vehicle failed pre-update diagnostics. Update BLOCKED for safety.")
-            sys.exit(2)
-    else:
-        log_message("WARNING: Diagnostics script not found. Proceeding with caution.")
-
-    # 3. Check for .git directory
-    updated_via_git = False
-    if os.path.exists(".git"):
-        log_message("Git repository detected. Attempting git-based update...")
-        ok, _, _ = run_command(["git", "pull", "origin", "main"])
-        if ok:
-            log_message("✓ Git pull completed successfully.")
-            updated_via_git = True
-        else:
-            log_message("WARNING: Git pull failed or remote unreachable. Falling back to URL-based update.")
-
-    # 4. Fallback URL or Mock based update
-    if not updated_via_git:
-        log_message("Initiating URL-based / fallback update package resolution...")
-        update_source_path = find_config("update_source.json")
-        if not update_source_path:
-            log_message("CRITICAL: Could not locate update_source.json configuration.")
-            sys.exit(3)
-
-        try:
-            with open(update_source_path, "r") as f:
-                update_cfg = json.load(f).get("update_policy", {})
-        except Exception as e:
-            log_message(f"CRITICAL: Failed to load update_source.json: {e}")
-            sys.exit(3)
-
-        url = update_cfg.get("fallback_url", "https://github.com/dfeen87/DS-EV/releases/download/v8.0.1/payload.tar.gz")
-        log_message(f"Source URL from configuration: {url}")
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            archive_path = os.path.join(temp_dir, "payload.tar.gz")
-            download_success = False
-
-            # Attempt to download
-            try:
-                log_message(f"Downloading update payload from {url}...")
-                urllib.request.urlretrieve(url, archive_path, timeout=5)
-                log_message("✓ Download completed successfully.")
-                download_success = True
-            except Exception as e:
-                log_message(f"WARNING: Download failed or network unavailable: {e}")
-
-                # Check for mock payload or simulate
-                local_mock = update_cfg.get("local_mock_source", "/opt/ds_enhancement/remote_payload/")
-                mock_archive = os.path.join(local_mock, "payload.tar.gz") if local_mock else None
-                if mock_archive and os.path.exists(mock_archive):
-                    log_message(f"Found local mock payload at: {mock_archive}")
-                    shutil.copy2(mock_archive, archive_path)
-                    download_success = True
-                else:
-                    log_message("No mock payload found. Simulating update package creation from current source for testing...")
-                    # Build a temporary archive from current directory to allow the pipeline to proceed deterministically
-                    try:
-                        with tarfile.open(archive_path, "w:gz") as tar:
-                            for folder in ["ds_core", "scripts", "config", "docs", "tests", "include", "src"]:
-                                if os.path.exists(folder):
-                                    tar.add(folder)
-                            for file in ["CMakeLists.txt", "Makefile", "LICENSE", "README.md"]:
-                                if os.path.exists(file):
-                                    tar.add(file)
-                        log_message("✓ Simulated update package compiled successfully from local tree.")
-                        download_success = True
-                    except Exception as ex:
-                        log_message(f"CRITICAL: Failed to build simulated update package: {ex}")
-                        sys.exit(4)
-
-            if not download_success:
-                log_message("CRITICAL: Update package could not be fetched or compiled.")
-                sys.exit(4)
-
-            # Extract archive to staging area
-            stage_dir = os.path.join(temp_dir, "staging")
-            os.makedirs(stage_dir, exist_ok=True)
-            log_message(f"Extracting package to staging area: {stage_dir}")
-            try:
-                with tarfile.open(archive_path, "r:gz") as tar:
-                    tar.extractall(path=stage_dir)
-                log_message("✓ Package extraction completed.")
-            except Exception as e:
-                log_message(f"CRITICAL: Failed to extract update archive: {e}")
-                sys.exit(5)
-
-            # Re-run Diagnostics inside the staging area to ensure update is safe
-            log_message("Running pre-flight diagnostics on the staged update package...")
-            staged_diag = os.path.join(stage_dir, "scripts/diagnostics.py")
-            if os.path.exists(staged_diag):
-                # Run diagnostics inside staging
-                ok, _, _ = run_command([sys.executable, staged_diag], cwd=stage_dir)
-                if not ok:
-                    log_message("CRITICAL: Staged update package failed safety checks. Update rejected!")
-                    sys.exit(6)
-                log_message("✓ Staged package passed diagnostics checks successfully.")
-            else:
-                log_message("WARNING: Diagnostics script not found in staging area.")
-
-            # Perform a safe replace/update of /opt/ds_enhancement
-            # Trigger backup first using scripts/rollback.sh
-            log_message("Creating system backup before applying updates...")
-            rollback_script = "scripts/rollback.sh" if os.path.exists("scripts/rollback.sh") else os.path.join(INSTALL_DIR, "bin/rollback.sh")
-            if os.path.exists(rollback_script):
-                ok, _, _ = run_command([rollback_script, "backup"])
-                if not ok:
-                    log_message("WARNING: Backup creation failed. Proceeding with caution.")
-            else:
-                log_message("WARNING: Rollback/backup utility not found.")
-
-            # Apply updates: deploy code from staging directory back into current workspace/installed directories
-            log_message("Deploying updated source files to current workspace...")
-            for item in os.listdir(stage_dir):
-                s_item = os.path.join(stage_dir, item)
-                d_item = os.path.abspath(item)
-                if os.path.isdir(s_item):
-                    if os.path.exists(d_item):
-                        shutil.rmtree(d_item)
-                    shutil.copytree(s_item, d_item)
-                else:
-                    if os.path.exists(d_item):
-                        os.remove(d_item)
-                    shutil.copy2(s_item, d_item)
-            log_message("✓ Staged files deployed to workspace.")
-
-    # 5. Compile and redeploy
-    log_message("Compiling high-performance binaries for the updated release...")
-    # Find user python to ensure header compliance with pybind11
-    python_exe = None
-    try:
-        # Check if we can run as user jules
-        res = subprocess.run(["sudo", "-u", "jules", "bash", "-l", "-c", "python3 -c 'import sys; print(sys.executable)'"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5)
-        if res.returncode == 0:
-            python_exe = res.stdout.strip()
-    except Exception:
-        pass
-
-    if not python_exe:
-        python_exe = sys.executable
-
-    log_message(f"Using Python executable for build: {python_exe}")
-
-    # Clean previous build and recompile
-    if os.path.exists("build"):
-        shutil.rmtree("build")
-    ok, _, _ = run_command(["cmake", "-B", "build", "-DCMAKE_BUILD_TYPE=Release", f"-DPYTHON_EXECUTABLE={python_exe}"])
-    if not ok:
-        log_message("CRITICAL: CMake configuration failed for updated code. Restoring backup!")
-        sys.exit(7)
-
-    ok, _, _ = run_command(["cmake", "--build", "build"])
-    if not ok:
-        log_message("CRITICAL: Compilation failed for updated code. Restoring backup!")
-        sys.exit(7)
-
-    log_message("✓ Updated code compiled successfully. Deploying to /opt/ds_enhancement...")
-
-    # We can invoke the Makefile's install target under sudo, but avoid loops.
-    # Let's perform a clean, manual installation of the target files to avoid loop,
-    # or let Makefile handle the deployment of compiled files.
-    # Actually, we can copy the files to target directories.
-    os.makedirs(INSTALL_DIR, exist_ok=True)
-    for dir_name in ["bin", "lib", "python", "python_fallback", "config", "logs", "backups", "docs"]:
-        os.makedirs(os.path.join(INSTALL_DIR, dir_name), exist_ok=True)
-
-    # Deploy binaries
-    shutil.copy2("ds_core/bin/ds_enhancer", os.path.join(INSTALL_DIR, "bin/"))
-    for f in os.listdir("ds_core/lib"):
-        shutil.copy2(os.path.join("ds_core/lib", f), os.path.join(INSTALL_DIR, "lib/"))
-
-    # Deploy scripts
-    for f in os.listdir("scripts"):
-        dest_path = os.path.join(INSTALL_DIR, "bin", f)
-        shutil.copy2(os.path.join("scripts", f), dest_path)
-        os.chmod(dest_path, 0o755)
-
-    # Deploy python bindings and wrappers
-    shutil.copy2("ds_core/python/ds_enhancer.py", os.path.join(INSTALL_DIR, "python/"))
-    shutil.copy2("ds_core/python_fallback/ds_enhancer_fallback.py", os.path.join(INSTALL_DIR, "python_fallback/"))
-
-    # Deploy configurations
-    for f in os.listdir("config"):
-        shutil.copy2(os.path.join("config", f), os.path.join(INSTALL_DIR, "config/"))
-
-    # Deploy documentation
-    for f in os.listdir("docs"):
-        shutil.copy2(os.path.join("docs", f), os.path.join(INSTALL_DIR, "docs/"))
-
-    # Log the successful outcome
-    log_message("SUCCESS: Software update completed successfully and deployed.")
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
