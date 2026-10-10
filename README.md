@@ -116,90 +116,33 @@ The repository contains local benchmark sources: [update](benchmarks/benchmark_u
 
 ## 🔧 Advanced Features & Examples
 
-The DS Battery Enhancement Library includes a suite of advanced capabilities designed for real‑world EV deployment, multi‑cell pack analysis, and high‑fidelity state estimation. These features extend the core DS engine and provide engineers with deeper visibility, better diagnostics, and more accurate long‑term predictions.
-
-This module is fully modular — you can enable only what your platform requires. All advanced features are demonstrated in the `/examples` directory for quick experimentation and integration.
+These components provide research paths for chemistry profiles, multi-cell models, Kalman filtering, and optional hybrid modeling. An interface or example does **not** establish hardware behavior or vehicle certification.
 
 ### ⚙️ Advanced Capabilities
 
-### 1. **Chemistry‑Specific Optimization**
-The library includes a full chemistry profile system for **LFP, NMC, NCA, LTO**, and custom chemistries.  
-Each profile tunes:
+1. **Chemistry profiles:** LFP, NMC, NCA, LTO and configurable stress/thermal parameters. Cell-specific correctness requires calibration and independent test evidence.
+2. **Multi-cell modeling:** Reference pack aggregation, cell imbalance indicators, weak-cell flags, and health estimates. The [`multi_cell_pack.cpp` example](examples/multi_cell_pack.cpp) is **disabled in the default CMake example build due to API mismatches**; it is not a verified integration test.
+3. **Kalman filtering:** Optional state-estimation filtering of model and sensor values; filter results need calibration and validation.
+4. **ML hybrid (optional):** Exploratory interface concepts; no trained-model benefit is established.
+5. **Fleet learning (proposed):** Potential aggregated chemistry/stress analytics, not a deployed opt-in fleet-data service.
+6. **GPU (experimental):** Optional CUDA configuration and interface stubs are not a supported, benchmarked, safety-validated GPU execution pipeline.
 
-- stress and coupling factors
-- thermal sensitivity  
-- voltage curves  
-- safe operating limits  
-- degradation characteristics  
-
-This ensures DS behaves correctly across different pack designs and chemistries.
+Use [`examples/basic_integration.cpp`](examples/basic_integration.cpp) for a default-build software example.
 
 ---
 
-### 2. **Multi‑Cell Pack Modeling**
-For packs with dozens or hundreds of series cells, the advanced module provides:
-
-- per‑cell DS dynamics
-- weak‑cell detection  
-- voltage imbalance tracking  
-- thermal spread analysis  
-- pack‑level health prediction (worst‑cell EOL logic)  
-
-This mirrors the architecture used in modern EV platforms and is essential for accurate pack‑level diagnostics.
-
----
-
-### 3. **Kalman Filter Integration**
-A lightweight Kalman filter fuses:
-
-- DS‑predicted SoC
-- measured SoC  
-- degradation proxies  
-- state and stress evolution
-
-This produces smoother, more reliable estimates under noisy sensor conditions.
-
----
-
-### 4. **ML Hybrid Predictions (Optional)**
-DS can be paired with a small neural network to refine:
-
-- degradation corrections  
-- EOL estimates  
-- confidence scores  
-
-This hybrid approach combines physical structure with data‑driven nuance.
-
----
-
-### 5. **Fleet‑Wide Learning (Opt‑In)**
-The system supports anonymized fleet data aggregation:
-
-- chemistry‑grouped degradation patterns  
-- temperature‑cycle correlations  
-- median degradation rates  
-- exportable datasets for ML training  
-
-This enables continuous improvement across large deployments.
-
----
-
-### 6. **GPU Acceleration (Experimental)**
-For large packs or high‑frequency BMS loops, the advanced module includes a GPU interface stub for parallel per‑cell updates.
-
----
 ## DS Torque Enhancement Module v2.0
 
 ### Overview
 
-The **DS Torque Enhancement Module** is a production-ready torque management system for electric vehicles. It translates DS battery intelligence into safe, dynamic, and performance-aware torque limits that protect battery health while maximizing vehicle performance.
+The **DS Torque Enhancement Module** models battery-aware torque limits in simulation. It is a research/reference implementation, **not** an independently validated vehicle command source or battery-protection guarantee.
 
 Unlike traditional torque limiters that only consider instantaneous power limits, this module uses the dual-state DS framework (physical state + historical stress state) to make intelligent decisions about power delivery based on:
 - **Long-term battery health** - Progressive derating as pack ages
 - **Stress and temperature history** - Reduces power after demanding driving
 - **Dynamic coupling** - Uses state and stress indicators
 - **Cell-level health** - Protects weak cells in multi-cell packs
-- **Predictive thermal management** - Proactive derating prevents shutdowns
+- **Thermal constraints** - Candidate derating based on model inputs; no shutdown-prevention guarantee
 
 ---
 
@@ -292,11 +235,13 @@ Combined Scaling =
   × Overboost Factor (if active)
 ```
 
-Each factor is computed independently and clamped to safe ranges, ensuring no single factor can cause unsafe operation.
+These are modeled factors, not a physical safety proof. Actual actuation authority must come from an independently assessed host system.
 
 ---
 
 ### Integration Examples
+
+**Schematic simulation pseudocode:** The following snippets contain host placeholders and may not compile against the current API. They illustrate intent, not approved actuator integration. For a built example, start with [`examples/basic_integration.cpp`](examples/basic_integration.cpp).
 
 ### Basic Integration (Single Motor, Simple BMS)
 
@@ -316,7 +261,7 @@ config.battery.max_discharge_power_kw = 250.0;
 
 ds::drive::DSTorqueManager torque_mgr(config);
 
-// In control loop (100Hz typical):
+// Hypothetical simulation loop; timing is not validated on vehicle hardware:
 void control_loop() {
     double dt = 0.01;  // 10ms
     
@@ -332,8 +277,8 @@ void control_loop() {
     double commanded_torque = std::min(driver_request, 
                                       result.max_drive_torque_nm);
     
-    // Send to motor controller
-    send_motor_command(commanded_torque);
+    // Simulation only: modeled torque; do not send to a real motor controller.
+    (void)commanded_torque;
     
     // Handle warnings
     if (result.thermal_derate_active) {
@@ -388,13 +333,14 @@ void advanced_control_loop() {
     double rear_torque = result.max_drive_torque_nm * 
                         result.rear_torque_fraction;
     
-    send_front_motor_command(front_torque);
-    send_rear_motor_command(rear_torque);
+    // Simulation only: record modeled front/rear outputs; do not actuate.
+    (void)front_torque;
+    (void)rear_torque;
     
     // Handle weak cells
     if (result.weak_cell_derate_active) {
         auto weak_cells = bms.get_weak_cells();
-        trigger_cell_balancing();
+        // Any cell balancing requires a separately validated host controller.
     }
 }
 ```
@@ -425,7 +371,7 @@ void launch_control_handler() {
         auto result = torque_mgr.compute_torque_limit(enhanced, 0.0, dt);
         
         if (result.overboost_active) {
-            // Maximum power launch with overboost
+            // Simulated overboost candidate, NOT a physical launch command
             commanded_torque = result.max_drive_torque_nm;
             show_message("OVERBOOST ACTIVE");
         }
@@ -471,7 +417,7 @@ struct DSTorqueWeights {
 };
 ```
 
-Adjust these weights to tune the balance between performance and battery longevity.
+These are research configuration parameters; impact on physical battery performance or longevity is not validated.
 
 ---
 
@@ -568,44 +514,19 @@ Temperature (°C)    Action
 
 ### Performance Characteristics
 
-### Typical Performance (400 Nm Peak Motor)
+Outputs depend on the configured battery/motor envelope and input sequence. A fixed example table cannot establish universally safe available torque.
 
-| Scenario | Available Torque | Limiting Factor |
-|----------|-----------------|----------------|
-| New battery, optimal temp, SPORT mode | 400 Nm (100%) | Motor limit |
-| 80% health, normal temp, SPORT mode | 360 Nm (90%) | DS health |
-| 50% health, hot battery (55°C) | 240 Nm (60%) | Thermal + health |
-| Low SOC (8%), cold battery | 120 Nm (30%) | SOC protection |
-| Weak cells detected | 320 Nm (80%) | Cell protection |
+**No verified worst-case execution time, emergency-stop latency, or battery-life improvement is provided by the current software tests.** Previous example figures (including sub-100-µs timing and 15–25% lifetime benefit) are not independent performance evidence.
 
-### Response Time
+### Benefits and Research Questions
 
-- **Computation time**: < 100 microseconds (typical)
-- **Torque rate limit**: 2000 Nm/s rise, 3000 Nm/s fall
-- **Mode switching**: 0.5s smooth transition
-- **Emergency shutdown**: < 10ms
-
----
-
-### Benefits Over Traditional Torque Limiting
-
-| Feature | Traditional Limiter | DS Torque Manager |
-|---------|-------------------|-------------------|
-| **Battery health awareness** | ❌ No | ✅ Yes - progressive derating |
-| **Predictive limiting** | ❌ No | ✅ Yes - uses DS forecasting |
-| **Cell-level protection** | ❌ Basic averaging | ✅ Weak cell detection |
-| **Thermal prediction** | ❌ Reactive only | ✅ Proactive derating |
-| **Stress history** | ❌ Ignored | ✅ Stress history adaptation |
-| **Lifespan impact** | Unknown | **+15-25% battery life** (estimated) |
-
----
+DS-EV explores whether battery-health, weak-cell and stress-history signals improve modeled torque governance. Comparative physical battery and vehicle outcomes remain unverified.
 
 ### Requirements
 
-- **C++11** or later
-- **DS Battery Enhancement Library** v5.0.0+
-- **DS BMS Middleware** v2.0+ (for multi-cell support)
-- Real-time operating system (recommended for control loops < 10ms)
+- C++17 and supported CMake toolchain.
+- Current DS core/middleware interfaces; optional Python embedding requires a separate build setting.
+- Simulation/research use only; hardware timing, concurrency and functional safety demand application-specific evidence.
 
 ---
 
@@ -619,7 +540,7 @@ Temperature (°C)    Action
 
 ### Overview
 
-The **AILEE Automotive Governance Layer** (`ds_core/python/ailee` and C++ `ds_ailee_governor`) is an integrated trust, safety, and governance suite for electric vehicle control. AILEE provides continuous validation of mechanical and electrical horsepower consistency, sensor signal validity, and vehicle operating parameters (SOC, SOH, cell temperature) to protect EV drivetrains from catastrophic failures or malicious command manipulation.
+The **AILEE Automotive Governance Layer** (`ds_core/python/ailee` and C++ `ds_ailee_governor`) is a reference software trust and protection boundary for modeled signals, scores and torque limits. Its governance evaluations are **not** a certified defense against physical vehicle faults or malicious command manipulation.
 
 ### Governance Levels & Derating Matrix
 
@@ -635,9 +556,9 @@ AILEE evaluates vehicle state and trust scores in real time and classifies opera
 ### Key Features & Components
 
 - **C++ Native Governor (`AileeHorsepowerGovernor`)**: High-performance C++ execution engine that computes mechanical horsepower ($HP_{mech} = \frac{\tau \times RPM}{7121.23}$), electrical horsepower ($HP_{elec} = \frac{V \times I}{745.7}$), and signal consistency scores.
-- **Embedded Python Trust Pipeline (`AileeTrustPipeline`)**: Embedded Pybind11 pipeline running the `ailee` trust framework with zero-latency C++ fallbacks.
-- **Black-Box Audit Logging**: Automatically logs all governance decisions, trust scores, raw signals, and derating reasons to `logs/ailee_automotive_audit.log`.
-- **Automatic Fallback Protection**: If the embedded Python environment is unreachable, `AileeHorsepowerGovernor` automatically fails safe to native C++ fallback evaluation.
+- **Optional Python trust pipeline (`AileeTrustPipeline`)**: Embedding is disabled in the default CMake configuration and requires an optional build; no zero-latency guarantee is established.
+- **Software audit output**: Configured logging can record evaluated governance decisions; these logs are not independently authenticated vehicle black-box recordings.
+- **Native evaluation path**: A C++ path exists without optional Python embedding; refer to the regression reports for its precise rejected-evidence behavior.
 
 ### C++ Integration Example
 
@@ -696,7 +617,7 @@ print(f"Level: {decision.level}, Governed HP: {decision.governed_hp}, Trust: {de
 
 ## BMS Middleware, Hardware Adapters & OEM Integration
 
-This repository includes a production-grade BMS middleware layer and OEM-friendly integration scaffolding that bridges the DS physics engine to real vehicle hardware, ECUs, and torque management systems without vendor lock-in.
+DS-EV includes BMS middleware and **reference** ECU/hardware integration scaffolding, intended for software evaluation rather than direct vehicle installation or actuation.
 
 ### 🔧 DS BMS Middleware v2.0
 
@@ -711,22 +632,22 @@ Key capabilities:
 
 - Single-pack and full multi-cell operation
 - Deterministic diagnostics (`DiagnosticReport`)
-- Fail-closed safety behavior (stale/missing signal detection)
+- Selected fail-closed sensor/evidence boundaries verified in the v8 engineering reports
 - Clean API for torque, power, and UI systems
-- Header-only, real-time safe design
+- C++17/header-based components; real-time deadlines require target-specific measurement
 
 📁 `include/ds_bms_middleware_v2.hpp`
 
-### 🔌 Production-Lean Hardware Adapter
+### 🔌 Reference Hardware Adapter
 
-A realistic, manufacturer-ready hardware adapter showing how to connect:
+A software reference illustrating integration boundaries for:
 
 - CAN-based pack telemetry
 - Optional SPI/I2C cell monitor ICs
 - Contactor and balancing commands
 - Time sources and safety checks
 
-This is not a stub — it reflects real OEM integration patterns while remaining portable across platforms. OEMs typically implement a thin CAN transport backend, map signals to their DBC, and plug directly into the DS middleware.
+This is **not a validated OEM integration**. Real CAN/DBC mapping, diagnostics, transport authenticity and actuator authority require independent host-specific engineering.
 
 📁 `src/ds_bms_hardware_adapter.hpp`
 
@@ -746,7 +667,7 @@ A clear, neutral CAN mapping document defining:
 
 ## 🛑 Intelligent Regenerative Braking (DS Regen Module)
 
-This release introduces an **DS-based intelligent regenerative braking manager** that extends battery and torque intelligence into the braking domain.
+The repository includes a **DS-based regenerative braking reference manager** for simulated battery-aware torque limits.
 
 The module computes **real-time, battery-aware regen torque limits** and a **recommended regen–friction blend**, using:
 - state of charge and voltage headroom  
@@ -755,8 +676,7 @@ The module computes **real-time, battery-aware regen torque limits** and a **rec
 - DS stress and confidence metrics
 - ABS / ESC cooperation signals  
 
-It is designed to **augment existing brake-by-wire systems**, not replace them.  
-ABS and ESC always retain authority, and regen is cut immediately during stability events with smooth recovery afterward.
+Any physical design must give independent vehicle brake, ABS and ESC systems priority. **DS-EV does not establish hardware arbitration, physical braking response times, or actuator safety.**
 
 ---
 
@@ -774,11 +694,11 @@ This completes the DS control loop:
 
 Version **v1.3.0** completes the DS energy control loop by treating regenerative braking as an active, battery-aware charging event.
 
-Regen torque decisions are converted into safe electrical charging updates and fed directly back into the BMS, allowing battery health, temperature, SOC headroom, and DS stress metrics to shape energy recovery in real time.
+The software models battery-side energy updates and regen recommendations subject to policy limits. This is not evidence of measured physical recovery or safe charging.
 
-This design augments existing brake-by-wire, ABS, and ESC systems without replacing them, preserving OEM safety authority while enabling physics-informed energy recovery.
+A real implementation would require independently validated OEM brake/ESC arbitration and battery charging constraints. These are software integration concepts.
 
-**Result:** A unified system where energy is intelligently stored, delivered, and recovered under a single DS-based framework.
+**Design goal:** Coherent software accounting for energy delivery and modeled recovery; remaining accounting questions are tracked in the remediation backlog.
 
 ---
 
