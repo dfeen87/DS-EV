@@ -7,14 +7,36 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://isocpp.org/)
-[![Status: Production Ready](https://img.shields.io/badge/Status-Production%20Ready-green.svg)]()
+[![Status: HIL Validation Required](https://img.shields.io/badge/Status-HIL%20Validation%20Required-green.svg)]()
 [![Hardened](https://img.shields.io/badge/Hardened-Edition%20Ready-Purple.svg)]()
 [![Version](https://img.shields.io/badge/Version-8.0.2-blue.svg)]()
 [![CI](https://github.com/dfeen87/DS-EV/actions/workflows/ci.yml/badge.svg)](https://github.com/dfeen87/DS-EV/actions/workflows/ci.yml)
 
-**Current development version: DS-EV v8.0.2.** This compatible updater hardening release requires an authenticated HTTPS payload, passing diagnostics, a staged build, and a verified backup before deployment. See [the v8.0.2 engineering report](docs/RELEASE_8.0.2.md) and [prioritized remediation backlog](docs/POST_BEDROCK_REMEDIATION_BACKLOG.md). The [v8.0.1 report](docs/RELEASE_8.0.1.md) and [v8.0.0 BEDROCK report](docs/RELEASE_8.0.0.md) remain historical records. Software test success is not vehicle hardware validation or safety certification.
+# DS-EV
 
-DS-EV is a production-ready, high-performance battery and power management suite for electric vehicles. By treating batteries as dual-state systems—where physical metrics (like voltage, current, and temperature) and historical stress tracking are dynamically coupled—we achieve earlier degradation detection, better health prediction, and optimized charging strategies.
+**Battery Intelligence, Energy Recovery & Safety Governance**
+
+### Research-Stage EV Battery Management & Control Architecture
+
+DS-EV is an actively developed C++17 and Python software framework exploring dual-state battery modeling, battery health prediction, regenerative-energy accounting, power management, and governed electric-vehicle control.
+
+The project applies production-oriented engineering practices, including numerical validation, fail-closed safety boundaries, transactional state management, regression testing, and verified software-update mechanisms.
+
+**Development status: Software research, simulation, and engineering validation. Not approved or validated for deployment in an operating vehicle.**
+
+> **Vehicle Safety Notice**
+>
+> DS-EV is not a certified automotive battery-management or vehicle-control product. Successful software tests do not establish safe operation with real batteries, motor controllers, charging systems, braking systems, or vehicle ECUs.
+>
+> Do not install DS-EV into an operating vehicle or use its example control outputs to command real automotive hardware. All demonstrations and examples are intended for software simulation or appropriately controlled, non-actuating engineering environments.
+>
+> Any future vehicle deployment requires independent hardware validation, system-level hazard analysis, integration testing, applicable functional-safety assessment, and qualified engineering oversight.
+
+**Current development version: v8.0.2**
+
+The v8.0.2 engineering effort emphasizes validated numerical behavior, trustworthy diagnostic evidence, protected backup and recovery operations, and fail-closed software maintenance.
+
+See `docs/RELEASE_8.0.2.md` and `docs/POST_BEDROCK_REMEDIATION_BACKLOG.md` for the verified scope, tests, and remaining limitations.
 
 ---
 
