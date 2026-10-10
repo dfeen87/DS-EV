@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: >-
+  If you use DS-EV in your research, please cite this software using
+  the metadata in this file.
+type: software
+title: "DS-EV: Battery Intelligence, Energy Recovery & Safety Governance"
+authors:
+  - family-names: Feeney
+    given-names: Don Michael
+    name-suffix: Jr.
+repository-code: "https://github.com/dfeen87/DS-EV"
+url: "https://github.com/dfeen87/DS-EV"
+license: MIT
+keywords:
+  - electric vehicles
+  - battery management systems
+  - dual-state battery modeling
+  - regenerative energy
+  - safety governance
