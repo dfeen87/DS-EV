@@ -997,7 +997,7 @@ sudo apt install build-essential cmake git python3 python3-pip
 ### **2. Clone the DS Repository**
 ```bash
 git clone https://github.com/dfeen87/DS-EV.git
-cd ds-enhancement
+cd DS-EV
 ```
 
 ### **3. Build the Core System**
@@ -1046,7 +1046,7 @@ This provides torque/regen optimization insights, stress‑aware driving guidanc
 make update
 ```
 
-**Note on Updater Limitations:** The default configured v8.0.1 `payload.tar.gz` remote release asset is unverified. When this occurs, the `scripts/update.py` script automatically falls back to constructing a simulated package from the current local source tree. A successful simulated update ensures continuity of the local tooling but does not represent a successfully downloaded or installed genuine remote software update.
+**Note on Updater Limitations:** The v8.0.1 release currently has no uploaded `payload.tar.gz` asset. The updater first attempts Git-based updating. When falling back, it may use a local mock archive or construct a simulated archive from the existing source tree. A successful simulated update ensures continuity of the local tooling but does not represent a successfully downloaded or installed genuine remote software update. Furthermore, the remote fallback code currently contains an unsupported `timeout` argument in `urllib.request.urlretrieve` that prevents the download from succeeding, which is an existing known defect.
 
 NOTE: The install.log file records build and installation details only; vehicle‑specific information is generated dynamically at runtime and does not require updates to the install log.
 
