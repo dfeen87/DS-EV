@@ -1120,31 +1120,4 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 We would like to acknowledge the engineers and developers who contributed to the formulation and testing of the Dual-State battery models.
 
-I would like to acknowledge **Google Jules**, **Microsoft Copilot**, **Anthropic Claude**, and **OpenAI ChatGPT** for their meaningful assistance in refining concepts, improving clarity, and strengthening the overall quality of this work.
-
----
-
-## Enterprise Consulting & Integration
-If your organization requires custom scaling, proprietary integration, or dedicated technical consulting to deploy these models at an enterprise level, please reach out at: dfeen87@gmail.com
-
----
-
-## 📞 Get Involved
-
-### For Engineers
-⭐ **Star this repo** if you find it interesting
-🔧 **Run the simulation/tests** and share reproducible results; do not connect to a real vehicle
-🐛 **Report issues** or suggest improvements
-📖 **Contribute examples** from different battery types
-
-### For Researchers
-📝 **Cite our work** if you use DS in your research
-🤝 **Collaborate** on validation studies
-📊 **Share results** (anonymized) to improve the model
-
-### For Companies
-💼 **Contact us** for integration support
-🤝 **Partner** on independent software and hardware validation research
-🚀 **Explore** future hardware integration only after independent safety assessment
-
----
+I would like to acknowledge **Google Jules**, **Microsoft Copilot**, **Anthropic Claude**, and **OpenAI ChatGPT and Codex** for their meaningful assistance in refining concepts, improving clarity, and strengthening the overall quality of this work.
