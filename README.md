@@ -721,65 +721,36 @@ Visualization, UX, and presentation remain fully owned by the automaker.
 
 ## 📁 Repository Structure
 
-```
+```text
 DS-EV/
-├── include/                              # Public header-only API
-│   ├── ds_battery_enhancement.hpp       # Core DS dual-state engine
-│   ├── ds_battery_core.hpp              # Foundational battery types and state
-│   ├── ds_bms_interfaces.hpp            # Abstract BMS interface definitions
-│   ├── ds_bms_middleware.hpp            # BMS middleware v1
-│   ├── ds_bms_middleware_v2.hpp         # BMS middleware v2 (multi-cell, diagnostics)
-│   ├── ds_advanced_features.hpp         # Chemistry profiles, Kalman, multi-cell pack
-│   ├── torque_enhancement.hpp            # DS Torque Enhancement Module v2.0
-│   ├── ds_regen_braking_manager_v1.hpp  # Intelligent regenerative braking manager
-│   ├── ds_energy_recovery_coordinator_v1.hpp  # Closed-loop energy recovery
-│   ├── ds_energy_stack.hpp              # Layered energy accounting stack
-│   ├── ds_energy_telemetry.hpp          # Read-only telemetry snapshot interface
-│   ├── ds_rest_api.hpp                  # Optional REST API surface
-│   └── battery_feen_adapter/
-│       └── battery_feen_adapter.hpp      # Third-party battery adapter shim
-├── src/
-│   └── ds_bms_hardware_adapter.hpp      # OEM hardware adapter (CAN/SPI/I2C)
-├── examples/                             # Reference integration examples
-│   ├── basic_integration.cpp             # Minimal single-pack DS usage (CI smoke test)
-│   ├── simple_bms_loop.cpp               # Simple BMS control loop
-│   ├── multi_cell_pack.cpp               # Multi-cell pack with advanced features
-│   ├── multicell_pack_loop.cpp           # 96s pack loop with weak-cell detection
-│   ├── regen_braking_loop.cpp            # Regen braking integration example
-│   ├── closed_loop_regen_charging.cpp    # Closed-loop energy recovery example
-│   ├── rest_api_server.cpp               # Embedded REST API server example
-│   └── rest_api_client.py                # Python REST API client example
-├── tests/                                # Unit test suite
-│   ├── test_core.cpp
-│   ├── test_advanced.cpp
-│   ├── test_middleware.cpp
-│   └── test_feen_integration.cpp
-├── benchmarks/                           # Performance benchmarks
-│   ├── benchmark_update.cpp
-│   └── benchmark_multicell.cpp
-├── docs/                                 # Reference documentation
-│   ├── architecture_overview.md
-│   ├── oem_can_mapping.md
-│   ├── oem_quick_start.md
-│   ├── regen_braking_overview.md
-│   ├── REST_API.md
-│   └── simulation_observations.md
-├── cmake/                                # CMake helpers
+├── include/                   # DS core forwarding headers, BMS middleware,
+│   ├── ailee_trust_layer/      # automotive governance reference components
+│   └── battery_feen_adapter/   # optional adapter surface
+├── src/                       # C++ governor, torque and hardware-adapter references
+├── ds_core/                   # CLI/shared-library sources, Python wrapper/fallback
+├── examples/                  # simulation and schematic integration examples
+├── tests/                     # C++/Python regression and smoke coverage
+├── benchmarks/                # locally runnable performance probes
+├── config/                    # example configuration and policy files
+├── scripts/                   # diagnostics, updater, backup/restore and migration
+├── docs/                      # architecture, safety, release reports and backlog
+├── .github/workflows/         # software CI
+├── CITATION.cff
 ├── CMakeLists.txt
-└── LICENSE
+└── Makefile
 ```
+
+Key entry points: [DS core](include/ds_battery_core.hpp), [BMS middleware](include/ds_bms_middleware_v2.hpp), [recovery coordinator](include/ds_energy_recovery_coordinator_v1.hpp), [AILEE reference components](include/ailee_trust_layer/), [hardware adapter](src/ds_bms_hardware_adapter.hpp), [Python fallback](ds_core/python_fallback/ds_enhancer_fallback.py), and [v8.0.2 development report](docs/RELEASE_8.0.2.md).
+
+**Build detail:** `examples/multi_cell_pack.cpp` is retained as a reference but is excluded from the default CMake example build pending its API reconciliation. Read the [CMake targets](CMakeLists.txt) rather than assuming every example is compiled by CI.
 
 ---
 
 ## 🔄 Closed-Cycle Energy Recovery
 
-Traditional EV systems treat driving, braking, and charging as loosely connected subsystems.  
-With **DS v1.3.0**, these phases are unified into a **continuous energy cycle** where energy is intentionally recovered, conditioned, and reintegrated into the battery state.
+The DS-EV research stack models the flow **Battery State → Torque Request → Vehicle Kinetics → Regeneration → Battery State**. This is a software representation of bounded energy transfer, not a perpetual-energy system or proof of additional physical recovery.
 
-**Battery → Torque → Braking → Battery**
-
-This does not create energy.  
-It **reduces dependence on external charging** by maximizing *healthy* energy recovery during normal vehicle operation.
+The [recovery coordinator](include/ds_energy_recovery_coordinator_v1.hpp) has an explicitly tracked [PB-09 accounting/history finding](docs/POST_BEDROCK_REMEDIATION_BACKLOG.md). Mechanical energy estimates, battery-side accepted charge, and measured real-world energy are distinct quantities and must not be conflated.
 
 ---
 
@@ -822,52 +793,32 @@ The battery is no longer treated as a component that only depletes and is later 
 
 ---
 
-## 📉 Reduced External Charging Demand
+## 📉 Potential Charging and Range Effects
 
-DS does **not** eliminate the need for external charging.
-It **reduces how often and how deeply external charging is required**.
+Regenerative braking can recover some kinetic/potential energy that would otherwise be dissipated, but the actual recovered amount depends on vehicle mass, speed, gradient, losses, pack conditions, friction braking, and controller limits.
 
-In typical mixed-use driving, a significant portion of energy normally lost to braking is recovered and reintegrated *without accelerating degradation*.
+**DS-EV has not demonstrated that its algorithms reduce external charging frequency, improve range, or prevent degradation relative to an existing EV BMS.** No vehicle-level measured recovery dataset is provided by the software CI suite.
 
-### Example Recovery Scenarios (75Ah / 400V Pack)
+### Interpreting Energy Estimates
 
-| Scenario | Energy Recovered | SOC Gain | Primary Limit |
-|--------|------------------|----------|---------------|
-| Urban stop-and-go (5 min) | ~0.32 kWh | +0.43% | Voltage |
-| Highway decel (90→40 km/h) | ~0.18 kWh | +0.24% | Power |
-| Mountain descent (3 km) | ~0.85 kWh | +1.1% | Thermal |
-| Weak cell present | ~0.54 kWh | +0.7% | Cell protection |
+- Treat regen **mechanical availability** as a candidate estimate, not credited battery energy.
+- Record **accepted battery-side energy** only under a documented current, voltage, time, sign, and unit convention.
+- Keep rejected-cycle history and diagnostic evidence consistent; see [PB-09 and PB-13](docs/POST_BEDROCK_REMEDIATION_BACKLOG.md).
+- Do not extrapolate illustrative route/scenario values to actual SOC percentage or driving range without measured pack capacity, efficiencies, and real operating evidence.
 
-Over daily operation, this reduces net energy drawn from chargers and extends usable driving range between plug-in events.
+### What This Enables for Research
 
----
+DS-EV provides software surfaces for exploring charge-acceptance policies, battery-health signals, energy-accounting invariants, and potential optimization strategies. These are hypotheses for independently controlled physical studies.
 
-## 🧠 What This Enables
+### Conservation of Energy
 
-- Fewer deep discharge cycles  
-- Reduced charging frequency for daily driving  
-- Improved battery longevity  
-- Predictable, health-aware energy recovery  
-- A complete, optimized EV energy cycle
-
-This is not “more regen.”  
-It is **better energy management**, powered by the Dual-State (DS/ds) EV Enhancement framework.
-
----
-
-## ⚠️ Important Note
-
-DS does **not** violate conservation of energy and does **not** claim perpetual motion.
-External charging remains necessary.  
-DS simply ensures that energy already paid for during motion is **not unnecessarily wasted**.
-
-
+DS-EV does not create energy or eliminate the need for external charging. Any eventual benefits must respect conversion losses and be measured independently.
 
 ---
 
 ### 🏗️ Architecture Overview
 
-A system-level view explaining how hardware, middleware, DS physics models, and vehicle control connect — including multi-layer safety enforcement and deployment modes from bench testing to production EV packs.
+A reference system-level view of hardware/middleware and vehicle-control boundaries. Deployment stages describe **future validation requirements**, not proven production integration.
 
 📁 `docs/architecture_overview.md`
 
@@ -877,13 +828,13 @@ A concise, manufacturer-focused guide covering:
 
 - What must be implemented
 - Where to plug in hardware
-- How to reach a running integration in 15–30 minutes
+- How to explore the software integration concept (not a 15–30 minute certified installation)
 
 📁 `docs/oem_quick_start.md`
 
 ### 🧪 Canonical Examples
 
-Reference examples demonstrating correct usage patterns:
+Illustrative software examples. Confirm that an example is included in the active CMake build and tests before treating it as verified:
 
 - Simple pack loop (single-pack equivalent): `examples/simple_bms_loop.cpp`
 - Multi-cell pack loop (96s EV-style pack, weak-cell detection): `examples/multicell_pack_loop.cpp`
@@ -892,9 +843,9 @@ Reference examples demonstrating correct usage patterns:
 
 ## Support & Feedback
 
-For issues, questions, or feature requests, please refer to the main DS project repository.
+For issues, questions and feature requests, use [this repository's GitHub issues](https://github.com/dfeen87/DS-EV/issues).
 
-**Note**: This is an intelligent power management system. Always perform thorough validation and safety testing before deploying in production vehicles.
+**Scope:** Only simulated and non-actuating research use is currently supported. There is no approved direct vehicle installation path.
 
 
 ## ⚡ Simulation-Only Quick Start
@@ -942,57 +893,31 @@ Do **not** run `make install` or `make update` as part of the simulation quick s
 
 ## 🔧 Quick Start C++ Guide
 
-### Installation
-
-```cpp
-// Just include the header
-#include "ds_battery_enhancement.hpp"
-```
-
-### Basic Usage
+The public [`ds_battery_enhancement.hpp`](include/ds_battery_enhancement.hpp) header forwards the DS core. This is a **single-cycle software illustration**, not a control loop:
 
 ```cpp
 #include "ds_battery_enhancement.hpp"
+#include <iostream>
 
 int main() {
-    // 1. Create and configure DS enhancement
-    ds::DSEnhancement ds;
     ds::DSConfig config;
-    config.nominal_capacity_ah = 75.0;  // Your battery capacity
-    config.nominal_voltage = 400.0;     // Your battery voltage
-    ds.init(config);
-    
-    // 2. In your BMS update loop
-    while (battery_running) {
-        // Read sensors (your existing code)
-        double voltage = read_voltage();
-        double current = read_current();
-        double temperature = read_temperature();
-        double soc = calculate_soc();
-        
-        // Get DS enhancement (ADD THIS LINE)
-        auto enhanced = ds.enhance(voltage, current, temperature, soc, 0.1);
-        
-        // Use enhanced predictions
-        if (enhanced.degradation_warning) {
-            trigger_maintenance_alert();
-        }
-        
-        double remaining_capacity = enhanced.health.remaining_capacity_percent;
-        double optimal_charge_current = enhanced.charging.recommended_current_limit;
-        
-        // Continue with your BMS logic...
-    }
-    
-    return 0;
+    config.nominal_capacity_ah = 75.0;
+    config.nominal_voltage = 400.0;
+
+    ds::DSEnhancement model;
+    model.init(config);
+    auto result = model.enhance(360.0, 10.0, 25.0, 0.8, 1.0);
+    std::cout << result.health.remaining_capacity_percent << "\n";
 }
 ```
 
-**That's it.** Two lines of code for DS enhancement.
+Use [`examples/basic_integration.cpp`](examples/basic_integration.cpp) and the [simulation quick start](#-simulation-only-quick-start) for an existing project-built program. Output fields are model estimates; they do not confer physical charging, motor-control or diagnostic authority.
 
 ---
 
 ## 📖 Integration Guide
+
+**Conceptual pseudocode only:** The following host-class integration sketch contains placeholders for readings, callbacks and settings; it is not a drop-in production BMS implementation and must not drive a charger or vehicle actuator.
 
 ### Step 1: Add to Your BMS Class
 
@@ -1030,9 +955,8 @@ public:
         // - enhanced.charging.recommended_voltage_limit
         // - enhanced.degradation_warning
         
-        // Use these to improve your control logic
-        update_charging_profile(enhanced.charging);
-        check_health_warnings(enhanced.health);
+        // Simulation only: inspect these modeled results.
+        // Do not apply charging changes or control real hardware.
         
         // Continue with existing logic...
     }
@@ -1056,65 +980,42 @@ config.nominal_voltage = 400.0;
 config.max_temperature = 60.0;
 ```
 
-**Tuning tips:**
+**Research tuning notes (not calibrated vehicle settings):**
 - Higher `lambda` → stronger coupling → more sensitive to degradation
-- Lower `tau_min` → faster updates → higher CPU usage
+- `tau_min` governs model timestep handling; validate numerical and state-integrity behavior before changing it
 - Adjust `entropy_weight` based on chemistry (higher for high-temp chemistries)
 
 ---
 
 ## 🧪 Validation & Testing
 
-### Compile and Run Example
+### Build and run the CMake-registered example
 
 ```bash
-# Compile the example
-g++ -std=c++17 -O3 -DDS_EXAMPLE_MAIN ds_battery_enhancement.hpp -o ds_demo
-
-# Run simulation
-./ds_demo
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DDS_ENABLE_PYTHON_GOVERNOR=OFF
+cmake --build build
+./build/basic_integration
 ```
 
-**Output:**
-```
-=== DS Battery Enhancement Demo ===
+The earlier illustrative 1,000-cycle terminal transcript is not a recorded outcome of this command and has been removed. Consult the [simulation observations](docs/simulation_observations.md) for context and the [BEDROCK release reports](docs/RELEASE_8.0.1.md) for recorded regression evidence.
 
-Simulating 1000 charge cycles...
-
-Cycle 0:
-  Degradation: 0.00%
-  Remaining Capacity: 100.00%
-  Cycles to 80%: 2000.0
-  DS Confidence: 100.00%
-
-Cycle 100:
-  Degradation: 1.50%
-  Remaining Capacity: 98.50%
-  Cycles to 80%: 1850.0
-  DS Confidence: 98.50%
-  
-...
-
-=== Final Health Assessment ===
-Predicted remaining capacity: 90.23%
-Estimated cycles to EOL: 1547
-Prediction confidence: 89.45%
-```
-
-### Unit Tests
+### C++ and Python regression tests
 
 ```bash
-cmake -B build && cmake --build build
 ctest --test-dir build --output-on-failure
+python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-### Benchmarks
+### Optional local benchmarks
 
 ```bash
-cmake -B build -DDS_BUILD_BENCHMARKS=ON && cmake --build build
+cmake -S . -B build -DDS_BUILD_BENCHMARKS=ON
+cmake --build build --target benchmark_update benchmark_multicell
 ./build/benchmark_update
 ./build/benchmark_multicell
 ```
+
+Benchmarks must be reported with CPU/hardware, compiler, flags, input load and repetitions. They are not a substitute for worst-case execution or hardware-in-the-loop evidence.
 
 ---
 
@@ -1140,41 +1041,16 @@ python3 -m unittest discover -s tests -p 'test_*.py' -v
 
 ---
 
-## 🎯 Use Cases
+## 🎯 Research Use Cases
 
-### Early Degradation Detection
-**Problem:** By the time traditional BMS detects accelerating degradation, significant damage is done.
+The following are **candidate studies**, not commercially validated performance claims:
 
-**DS Solution:** Monitors physical and historical stress indicators to catch accelerating degradation 20-30% earlier.
+- **Battery degradation research:** Compare modeled stress indicators and estimated health against independently labeled cycle-life datasets.
+- **Charging-strategy exploration:** Evaluate candidate current/voltage recommendations under chemistry-specific test constraints; never apply the outputs directly to a live charger.
+- **Predictive-maintenance research:** Study whether stress-history indicators add value to measured failure data.
+- **Second-life assessment concepts:** Explore predicted residual capacity, uncertainty and health profiles against independently characterized retired cells.
 
-**Impact:** Extended warranty periods, reduced field failures, better residual value prediction.
-
----
-
-### Optimized Fast Charging
-**Problem:** Fast charging degrades batteries, but optimal charging profiles are chemistry-specific and hard to model.
-
-**DS Solution:** Computes dynamic charging profiles that minimize degradation.
-
-**Impact:** Faster charging with less degradation, personalized charging curves per vehicle.
-
----
-
-### Predictive Maintenance
-**Problem:** Current BMS can estimate remaining capacity but struggles with sudden failure modes.
-
-**DS Solution:** Tracks stress accumulation and performance stability to detect pre-failure signatures.
-
-**Impact:** Schedule maintenance before failures, reduce roadside breakdowns, improve fleet management.
-
----
-
-### Second-Life Battery Assessment
-**Problem:** Hard to accurately assess degraded batteries for second-life applications (grid storage, etc.).
-
-**DS Solution:** Assessment powered by complete historical stress modeling. Better remaining-capacity and reliability estimates.
-
-**Impact:** Unlock second-life battery markets, reduce waste, improve circular economy.
+No verified warranty improvement, avoided breakdown rate, faster-charge benefit, or longer-life percentage is claimed.
 
 ---
 
@@ -1212,22 +1088,23 @@ Temp                                                   Warnings
 SoC
 ```
 
-### Performance Characteristics
+### Performance and Runtime Constraints
 
-- **Algorithmic complexity:** O(1) per update (no iteration, no search)
-- **Memory access:** Sequential, cache-friendly
-- **Parallelizable:** Each battery pack independent
-- **Deterministic timing:** No dynamic allocation in update loop
+- Computational complexity depends on the subsystem and enabled optional components; no universal fixed-cost update contract is established.
+- Do not infer real-time suitability, allocation bounds or thread safety from header-only C++ or deterministic simulation.
+- Measure worst-case runtime, memory, thread behavior and integration on the intended target before making performance assertions.
 
 ---
 
 ## 🔐 Safety & Reliability
 
-### Built-in Safeguards
+### Verified software-engineering boundaries
 
-- ✅ **Bounds checking** - All state variables clamped to physical ranges
-- ✅ **Numerical stability** - Validated for 1M+ update cycles
-- ✅ **Exception safety** - No memory leaks, strong exception guarantee
+- C++/Python regression tests exercise selected nonfinite inputs, protection limits and accepted/rejected-cycle state conditions.
+- BEDROCK remediation documents the individual findings, reproductions, fixes and their remaining limits: [v8.0.0](docs/RELEASE_8.0.0.md), [v8.0.1](docs/RELEASE_8.0.1.md), and [open backlog](docs/POST_BEDROCK_REMEDIATION_BACKLOG.md).
+- The v8.0.2 updater **fails closed** when trusted payload, diagnostic receipt or backup evidence is unavailable; its backup/deployment path is **not atomic or power-loss safe**.
+
+**Not demonstrated:** universal exception safety, zero memory leaks under every condition, 1,000,000 safe physical update cycles, fault-tolerant vehicle control, or ISO 26262 certification. The [safety scope](docs/SAFETY.md) is essential reading.
 
 ---
 
@@ -1278,7 +1155,7 @@ If your organization requires custom scaling, proprietary integration, or dedica
 
 ### For Engineers
 ⭐ **Star this repo** if you find it interesting
-🔧 **Try it out** in your BMS and let us know results
+🔧 **Run the simulation/tests** and share reproducible results; do not connect to a real vehicle
 🐛 **Report issues** or suggest improvements
 📖 **Contribute examples** from different battery types
 
@@ -1289,7 +1166,7 @@ If your organization requires custom scaling, proprietary integration, or dedica
 
 ### For Companies
 💼 **Contact us** for integration support
-🤝 **Partner** on validation and deployment
-🚀 **Build** the next generation of battery management together
+🤝 **Partner** on independent software and hardware validation research
+🚀 **Explore** future hardware integration only after independent safety assessment
 
 ---
