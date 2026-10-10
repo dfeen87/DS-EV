@@ -55,7 +55,7 @@ Engineering work focuses on input validation, raw-evidence preservation, explici
 - [Integration Guide](#-integration-guide)
 - [Validation & Testing](#-validation--testing)
 - [Continuous Integration](#-continuous-integration)
-- [Use Cases](#-use-cases)
+- [Research Use Cases](#-research-use-cases)
 - [Architecture](#-architecture)
 - [Safety & Reliability](#-safety--reliability)
 - [Roadmap](#-roadmap)
@@ -474,41 +474,16 @@ if (result.weak_cell_derate_active) std::cout << "  - Weak Cells\n";
 
 ---
 
-### Safety Features
+### Safety Features (Software Policy Examples)
 
-### Multiple Protection Layers
+The following represent **configurable modeling and protection concepts**, not hardware actuator interlocks, guaranteed motor shutdown times, or universal battery thresholds:
 
-1. **Hard Limits**: Absolute maximum values that cannot be exceeded
-2. **Soft Limits**: Gradual derating as limits are approached
-3. **Rate Limiting**: Prevents sudden torque changes
-4. **Fault Detection**: Automatic shutdown on critical faults
-5. **Limp Mode**: Minimal power delivery in emergency situations
+1. **Hard/soft model limits:** Constrain calculated torque recommendations under configured policy.
+2. **Rate limiting:** Model changes over successive accepted cycles; decreasing protection ceilings must take precedence where documented.
+3. **Fault and limp-mode recommendations:** Represent constrained or rejected software outputs, not validated actual vehicle emergency actions.
+4. **SOC/temperature boundaries:** Depend on chemistry, host configuration, operating evidence, and applicable regression tests.
 
-### SOC Protection
-
-```
-100% ──────────────────────────────── No regen above 95%
- 95% ────────────────────────┐        
- 90% ────────────┐           │ Gradual regen reduction
-     Normal      │           │
-     Operation   │           │
- 10% ────────────┘           │
-  5% ────────────────────────┘ Limp mode below 5%
-  0% ──────────────────────────────── 
-```
-
-### Thermal Protection
-
-```
-Temperature (°C)    Action
-───────────────────────────────────────
-   < 0          │  Cold weather derating
- 0 - 25         │  Optimal performance
-25 - 45         │  Normal operation
-45 - 60         │  Gradual thermal derating
-   > 60         │  Aggressive derating
-   > 70         │  Emergency shutdown
-```
+Numerical thresholds must be confirmed against the configured policy and appropriate host safety analysis. Consult [safety scope](docs/SAFETY.md) and [v8.0.1 evidence](docs/RELEASE_8.0.1.md).
 
 ---
 
@@ -544,14 +519,16 @@ The **AILEE Automotive Governance Layer** (`ds_core/python/ailee` and C++ `ds_ai
 
 ### Governance Levels & Derating Matrix
 
-AILEE evaluates vehicle state and trust scores in real time and classifies operations into four distinct governance levels (configured via `config/ailee_automotive_config.yaml`):
+AILEE evaluates software vehicle-state/trust inputs and applies configured four-level governance envelopes (see `config/ailee_automotive_config.yaml`). These are **model authorization fractions**, not guaranteed safe drivetrain output:
 
 | Level | Name | Cap Fraction (HP / Torque / Current) | Description |
 |-------|------|--------------------------------------|-------------|
-| **Level 0** | **Normal Operation** | **1.00 (100%)** | Full performance envelope authorized. High signal trust and HP consistency. |
+| **Level 0** | **Normal Operation** | **1.00 (100%)** | Full modeled envelope *when acceptable evidence and policy permit*. |
 | **Level 1** | **Soft Ceiling** | **0.90 (90%)** | Soft derating applied when mild signal drift or thermal soft limits are approached. |
 | **Level 2** | **Hard Ceiling** | **0.65 (65%)** | Hard derating applied when consistency or trust scores experience moderate anomalies. |
-| **Level 3** | **Protective Mode** | **0.25 (25%)** | Protective fallback mode applied when trust drops below critical threshold (e.g., < 0.65). |
+| **Level 3** | **Protective Mode** | **0.25 (25%)** | Configured derating fraction for eligible protective decisions; invalid/missing evidence may require **zero** authority instead. |
+
+Configured envelope values are examples of current policy defaults, not universal safety constants. Invalid sensor evidence is expected to fail closed according to the tested boundary; see [v8.0.1](docs/RELEASE_8.0.1.md).
 
 ### Key Features & Components
 
@@ -765,13 +742,13 @@ Charging is dynamically constrained by:
 - cell imbalance and weak-cell protection
 - DS stress and confidence metrics
 
-If any constraint is violated, regen is smoothly reduced or disabled.
+The reference model may reduce or reject regeneration requests under selected constraints; accepted state transitions and accounting must satisfy the applicable regression tests. No physical braking response is guaranteed.
 
 ---
 
 ## 🔁 From “Closed Loop” to “Energy Cycle”
 
-Because braking energy is continuously reintegrated into the battery model, the system behaves as a **cycle**, not a one-way control loop.
+When simulated recovery is fed back into the model, the software represents a **cycle**, not a one-way control path.
 
 ```
 Battery State
@@ -789,7 +766,7 @@ Controlled Charging
 Battery State Update
 ```
 
-The battery is no longer treated as a component that only depletes and is later recharged — it becomes an **active participant in the energy flow** of the vehicle.
+This feedback arrangement lets the research model represent battery state as part of a recurrent energy-management simulation.
 
 ---
 
@@ -1059,8 +1036,9 @@ No verified warranty improvement, avoided breakdown rate, faster-charge benefit,
 ### Module Structure
 
 ```
-ds_battery_enhancement.hpp
-├── Constants & Configuration (DSConfig)
+ds_battery_enhancement.hpp (public forwarding header)
+└── ds_battery_core.hpp
+    ├── Constants & Configuration (DSConfig)
 ├── Matrix4x4 (lightweight metric calculations)
 ├── DSState (dual-state representation)
 ├── Prediction Results (output structures)
