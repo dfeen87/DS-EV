@@ -9,6 +9,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import socket
 import shutil
@@ -64,6 +65,7 @@ class TemporaryUpdaterCase(unittest.TestCase):
         self.live.mkdir()
         self.logs = []
         self.commands = []
+        self.diagnostic_environments = []
         self.fail_command = None
         self.backup_mode = "valid"
         self.restore_mode = "valid"
@@ -143,7 +145,7 @@ class TemporaryUpdaterCase(unittest.TestCase):
             if path.is_file()
         }
 
-    def runner(self, command, cwd=None):
+    def runner(self, command, cwd=None, env=None):
         command = [str(value) for value in command]
         self.commands.append((command, cwd))
         self.assertFalse(any(value == "sudo" for value in command))
@@ -151,6 +153,12 @@ class TemporaryUpdaterCase(unittest.TestCase):
         self.assertNotIn("git", command)
         if self.fail_command and self.fail_command(command, cwd):
             return False, "", "injected command failure"
+        if any(value.endswith("diagnostics.py") for value in command):
+            self.diagnostic_environments.append(env)
+            context = Path(command[command.index("--config-dir") + 1])
+            nonce = command[command.index("--evidence-nonce") + 1]
+            receipt = update._diagnostic_receipt(context, nonce)
+            return True, update.DIAGNOSTIC_EVIDENCE_PREFIX + json.dumps(receipt, sort_keys=True), ""
         if "backup" in command:
             if self.backup_mode == "failed":
                 return False, "", "backup refused"
@@ -592,7 +600,9 @@ class DeploymentTests(TemporaryUpdaterCase):
         diagnostics_commands = [(command, cwd) for command, cwd in self.commands
                                 if any(value.endswith("diagnostics.py") for value in command)]
         self.assertEqual(len(diagnostics_commands), 3)
-        for command, cwd in diagnostics_commands[1:]:
+        for command, cwd in diagnostics_commands:
+            self.assertIn("--updater-evidence", command)
+            self.assertIn("--evidence-nonce", command)
             self.assertIn("--config-dir", command)
             configuration = Path(command[command.index("--config-dir") + 1])
             self.assertEqual(configuration, Path(cwd))
@@ -603,7 +613,145 @@ class DeploymentTests(TemporaryUpdaterCase):
         self.assertEqual((self.live / "bin/ds_enhancer").read_bytes(), b"new binary")
 
 
+class DiagnosticEvidenceTests(TemporaryUpdaterCase):
+    def test_successful_legacy_diagnostics_without_receipt_require_migration(self):
+        def legacy_runner(command, cwd=None, env=None):
+            if any(value.endswith("diagnostics.py") for value in command):
+                return True, "All pre-flight diagnostics passed", ""
+            return self.runner(command, cwd=cwd, env=env)
+
+        message = self.assert_blocked("migrate legacy installed diagnostics", runner=legacy_runner)
+        self.assertIn("missing or mismatched evidence receipt", message)
+        self.opener.assert_not_called()
+
+    def test_legacy_script_rejecting_contract_fails_before_download(self):
+        self.write_file(self.live / "bin/diagnostics.py", b"import argparse\nargparse.ArgumentParser().parse_args()\n")
+
+        def legacy_runner(command, cwd=None, env=None):
+            if str(self.live / "bin/diagnostics.py") in command:
+                return update.run_command(command, cwd=cwd, env=env)
+            return self.runner(command, cwd=cwd, env=env)
+
+        self.assert_blocked("migrate legacy installed diagnostics", runner=legacy_runner)
+        self.opener.assert_not_called()
+
+    def test_wrong_receipt_source_nonce_hash_and_duplicate_receipts_are_rejected(self):
+        for change in ("source", "nonce", "digest", "malformed", "duplicate"):
+            with self.subTest(change=change):
+                def dishonest_runner(command, cwd=None, env=None):
+                    ok, output, error = self.runner(command, cwd=cwd, env=env)
+                    if not any(value.endswith("diagnostics.py") for value in command):
+                        return ok, output, error
+                    receipt = json.loads(output[len(update.DIAGNOSTIC_EVIDENCE_PREFIX):])
+                    if change == "source":
+                        receipt["config_dir"] = str(self.live / "config")
+                    elif change == "nonce":
+                        receipt["nonce"] = "0" * 32
+                    elif change == "digest":
+                        receipt["sha256"]["vehicle_status.json"] = "0" * 64
+                    if change == "malformed":
+                        output = update.DIAGNOSTIC_EVIDENCE_PREFIX + "invalid json"
+                    else:
+                        output = update.DIAGNOSTIC_EVIDENCE_PREFIX + json.dumps(receipt)
+                        if change == "duplicate":
+                            output += "\n" + output
+                    return ok, output, error
+
+                self.assert_blocked("current diagnostics failed", runner=dishonest_runner)
+                self.opener.assert_not_called()
+
+    def test_selected_evidence_changed_during_diagnostics_blocks_deployment(self):
+        def changing_runner(command, cwd=None, env=None):
+            result = self.runner(command, cwd=cwd, env=env)
+            if any(value.endswith("diagnostics.py") for value in command):
+                (Path(cwd) / "vehicle_status.json").write_bytes(b'{"changed": true}')
+            return result
+
+        self.assert_blocked("selected evidence changed", runner=changing_runner)
+        self.opener.assert_not_called()
+
+    def test_all_diagnostic_processes_receive_environment_without_ds_overrides(self):
+        with mock.patch.dict(os.environ, {"DS_SOH": "99", "DS_MODEL": "healthy-fixture",
+                                         "DS_CUSTOM_OVERRIDE": "ignore", "KEEP_DIAGNOSTIC_ENV": "keep"}):
+            self.assertEqual(self.run_update(), 0, self.logs)
+        self.assertEqual(len(self.diagnostic_environments), 3)
+        for environment in self.diagnostic_environments:
+            self.assertIsInstance(environment, dict)
+            self.assertFalse(any(name.startswith("DS_") for name in environment))
+            self.assertEqual(environment["KEEP_DIAGNOSTIC_ENV"], "keep")
+
+    def test_current_real_diagnostics_reject_unsafe_installation_despite_environment_and_preset(self):
+        self.write_file(self.live / "bin/diagnostics.py", (SCRIPTS / "diagnostics.py").read_bytes())
+        unsafe = json.loads((self.live / "config/vehicle_status.json").read_text())
+        unsafe["simulated_presets"] = {unsafe["model"]: dict(unsafe, battery_soh=99.0)}
+        unsafe["battery_soh"] = 20.0
+        self.write_file(self.live / "config/vehicle_status.json", json.dumps(unsafe).encode())
+
+        def actual_diagnostic_runner(command, cwd=None, env=None):
+            if str(self.live / "bin/diagnostics.py") in command:
+                return update.run_command(command, cwd=cwd, env=env)
+            return self.runner(command, cwd=cwd, env=env)
+
+        with mock.patch.dict(os.environ, {"DS_SOH": "99", "DS_TEMP_C": "25", "DS_VOLTAGE_V": "355"}):
+            message = self.assert_blocked("current diagnostics failed", runner=actual_diagnostic_runner)
+        self.assertIn("20.0%", message)
+        self.opener.assert_not_called()
+
+    def test_staged_missing_receipt_blocks_before_backup(self):
+        def legacy_stage_runner(command, cwd=None, env=None):
+            result = self.runner(command, cwd=cwd, env=env)
+            if any(value.endswith("/scripts/diagnostics.py") for value in command):
+                return True, "legacy staged success", ""
+            return result
+
+        self.assert_blocked("staged diagnostics failed", runner=legacy_stage_runner)
+
+    def test_deployed_missing_receipt_restores_verified_snapshot_and_returns_failure(self):
+        diagnostic_calls = 0
+
+        def legacy_deployed_runner(command, cwd=None, env=None):
+            nonlocal diagnostic_calls
+            result = self.runner(command, cwd=cwd, env=env)
+            if any(value.endswith("diagnostics.py") for value in command):
+                diagnostic_calls += 1
+                if diagnostic_calls == 3:
+                    return True, "legacy deployed success", ""
+            return result
+
+        before = self.snapshot()
+        self.assertNotEqual(self.run_update(runner=legacy_deployed_runner), 0)
+        self.assertEqual(self.snapshot(), before)
+        self.assertTrue(any(line.startswith("RESTORATION VERIFIED:") for line in self.logs))
+        self.assertFalse(any(line.startswith("SUCCESS:") for line in self.logs))
+
+
 class BackupVerificationTests(TemporaryUpdaterCase):
+    def test_updater_rejects_writable_existing_backup_storage_without_deployment(self):
+        backups = self.live / "backups"
+        backups.mkdir()
+        backups.chmod(0o777)
+        before = self.snapshot()
+        self.assertNotEqual(self.run_update(), 0)
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(list(backups.iterdir()), [])
+        self.assertIn("writable", "\n".join(self.logs))
+        self.assertFalse(any(line.startswith("SUCCESS:") for line in self.logs))
+        self.assertFalse(any("restore" in command for command, _ in self.commands))
+
+    def test_updater_rechecks_backup_permissions_after_backup_command(self):
+        def unprotected_backup_runner(command, cwd=None, env=None):
+            result = self.runner(command, cwd=cwd, env=env)
+            if "backup" in command:
+                (self.live / "backups").chmod(0o777)
+            return result
+
+        before = self.snapshot()
+        self.assertNotEqual(self.run_update(runner=unprotected_backup_runner), 0)
+        self.assertEqual(self.snapshot(), before)
+        self.assertIn("writable", "\n".join(self.logs))
+        self.assertFalse(any(line.startswith("SUCCESS:") for line in self.logs))
+        self.assertFalse(any("restore" in command for command, _ in self.commands))
+
     def test_corrupt_snapshot_is_rejected_before_restore_mutates_installation(self):
         import backup_restore
         snapshot = backup_restore.create_backup(self.live, self.live / "backups", "verified")
@@ -714,10 +862,12 @@ class DiagnosticLoggingTests(unittest.TestCase):
                 "model": "Tesla_Model_3_LR", "firmware_version": "v2024.12.15",
                 "battery_soh": 20.0, "temperature_c": 25.0, "voltage_v": 355.0, "soc": 65.0,
             }
-            (context / "vehicle_status.json").write_text(json.dumps(unsafe), encoding="utf-8")
             healthy = dict(unsafe, battery_soh=99.0)
+            unsafe["simulated_presets"] = {unsafe["model"]: healthy}
+            (context / "vehicle_status.json").write_text(json.dumps(unsafe), encoding="utf-8")
             original_load = diagnostics.load_json
             original_exists = diagnostics.os.path.exists
+            original_read = Path.read_bytes
 
             def load(path):
                 if str(path) == "/tmp/vehicle_status.json":
@@ -727,21 +877,103 @@ class DiagnosticLoggingTests(unittest.TestCase):
             def exists(path):
                 return str(path) == "/tmp/vehicle_status.json" or original_exists(path)
 
-            arguments = [str(SCRIPTS / "diagnostics.py"), "--config-dir", str(context),
-                         "--log-dir", str(Path(directory) / "logs")]
+            arguments = [str(SCRIPTS / "diagnostics.py"), "--updater-evidence", "--config-dir", str(context),
+                         "--evidence-nonce", "1" * 32, "--log-dir", str(Path(directory) / "logs")]
             with mock.patch.object(sys, "argv", arguments), \
                     mock.patch.object(diagnostics, "load_json", side_effect=load) as loader, \
                     mock.patch.object(diagnostics.os.path, "exists", side_effect=exists), \
-                    mock.patch.dict(diagnostics.os.environ, {}, clear=True), \
+                    mock.patch.dict(diagnostics.os.environ, {"DS_SOH": "99", "DS_MODEL": unsafe["model"],
+                                                            "DS_FIRMWARE": unsafe["firmware_version"]}), \
+                    mock.patch.object(Path, "read_bytes", autospec=True, side_effect=original_read) as reader, \
                     mock.patch.object(diagnostics.platform, "system", return_value="Linux"), \
                     mock.patch("builtins.print"):
                 with self.assertRaises(SystemExit) as result:
                     diagnostics.main()
             self.assertEqual(result.exception.code, 4)
-            self.assertTrue(any(str(call.args[0]) == str(context / "vehicle_status.json")
-                                for call in loader.call_args_list))
+            self.assertTrue(any(call.args[0] == context / "vehicle_status.json" for call in reader.call_args_list))
             self.assertFalse(any(str(call.args[0]) == "/tmp/vehicle_status.json"
                                  for call in loader.call_args_list))
+
+    def test_strict_diagnostics_emit_receipt_for_exact_selected_source(self):
+        import diagnostics
+        with tempfile.TemporaryDirectory(prefix="ds-evidence-success-") as directory:
+            context = Path(directory) / "config"
+            context.mkdir(mode=0o700)
+            for name in update.DIAGNOSTIC_EVIDENCE_FILES:
+                (context / name).write_bytes((ROOT / "config" / name).read_bytes())
+            nonce = "2" * 32
+            arguments = [str(SCRIPTS / "diagnostics.py"), "--updater-evidence", "--config-dir", str(context),
+                         "--evidence-nonce", nonce, "--log-dir", str(Path(directory) / "logs")]
+            with mock.patch.object(sys, "argv", arguments), \
+                    mock.patch.dict(os.environ, {"DS_SOH": "0", "DS_MODEL": "unknown-environment-model"}), \
+                    mock.patch.object(diagnostics.platform, "system", return_value="Linux"), \
+                    mock.patch("builtins.print") as printer:
+                with self.assertRaises(SystemExit) as result:
+                    diagnostics.main()
+            self.assertEqual(result.exception.code, 0)
+            receipts = [call.args[0] for call in printer.call_args_list
+                        if call.args and str(call.args[0]).startswith(update.DIAGNOSTIC_EVIDENCE_PREFIX)]
+            self.assertEqual(len(receipts), 1)
+            self.assertEqual(json.loads(receipts[0][len(update.DIAGNOSTIC_EVIDENCE_PREFIX):]),
+                             update._diagnostic_receipt(context, nonce))
+
+    def test_strict_diagnostics_reject_measurement_cli_overrides(self):
+        import diagnostics
+        for option in ("--model", "--firmware", "--soh", "--temp", "--voltage", "--soc"):
+            with self.subTest(option=option):
+                arguments = [str(SCRIPTS / "diagnostics.py"), "--updater-evidence", "--config-dir", "/unused",
+                             "--evidence-nonce", "1" * 32, "--log-dir", "/unused", option, "99"]
+                with mock.patch.object(sys, "argv", arguments), mock.patch.object(sys, "stderr", io.StringIO()) as errors:
+                    with self.assertRaises(SystemExit) as result:
+                        diagnostics.main()
+                self.assertEqual(result.exception.code, 2)
+                self.assertIn("overrides are prohibited", errors.getvalue())
+
+    def test_strict_evidence_rejects_writable_config_file_directory_and_parent(self):
+        import diagnostics
+        with tempfile.TemporaryDirectory(prefix="ds-evidence-permissions-") as directory:
+            parent = Path(directory) / "parent"
+            context = parent / "config"
+            context.mkdir(parents=True, mode=0o700)
+            evidence = context / "vehicle_status.json"
+            evidence.write_bytes(b"{}")
+            for path in (evidence, context, parent):
+                original_mode = path.stat().st_mode & 0o7777
+                for extra_write in (0o020, 0o002):
+                    with self.subTest(path=path.name, extra_write=extra_write):
+                        path.chmod(original_mode | extra_write)
+                        try:
+                            with self.assertRaisesRegex(ValueError, "writable"):
+                                diagnostics._protected_evidence_path(evidence)
+                        finally:
+                            path.chmod(original_mode)
+
+    def test_strict_evidence_rejects_symlink_source(self):
+        import diagnostics
+        with tempfile.TemporaryDirectory(prefix="ds-evidence-symlink-") as directory:
+            target = Path(directory) / "status.json"
+            target.write_bytes(b"{}")
+            link = Path(directory) / "vehicle_status.json"
+            link.symlink_to(target)
+            with self.assertRaisesRegex(ValueError, "symlink"):
+                diagnostics._protected_evidence_path(link)
+
+    def test_root_evidence_contract_checks_ancestors_above_sticky_tmp(self):
+        import diagnostics
+        with tempfile.TemporaryDirectory(prefix="ds-evidence-root-contract-") as directory:
+            evidence = Path(directory) / "vehicle_status.json"
+            evidence.write_bytes(b"{}")
+            original_stat = Path.stat
+
+            def root_owned_stat(path, *args, **kwargs):
+                values = list(original_stat(path, *args, **kwargs))
+                values[4] = 12345 if path == Path("/") else 0
+                return os.stat_result(values)
+
+            with mock.patch.object(diagnostics.os, "geteuid", return_value=0), \
+                    mock.patch.object(Path, "stat", root_owned_stat):
+                with self.assertRaisesRegex(ValueError, "unauthorized account"):
+                    diagnostics._protected_evidence_path(evidence)
 
 
 if __name__ == "__main__":

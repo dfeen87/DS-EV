@@ -42,6 +42,9 @@ SOURCE_FILES = ("CMakeLists.txt", "scripts/update.py", "scripts/diagnostics.py",
                 "ds_core/python_fallback/ds_enhancer_fallback.py")
 MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024
 MAX_EXTRACTED_BYTES = 2 * 1024 * 1024 * 1024
+DIAGNOSTIC_EVIDENCE_FILES = ("install_policy.json", "vehicle_status.json",
+                             "vehicle_profiles.json", "safety_thresholds.json")
+DIAGNOSTIC_EVIDENCE_PREFIX = "DS_UPDATER_EVIDENCE_V1:"
 
 
 class UpdateError(RuntimeError):
@@ -53,9 +56,9 @@ def log_message(message):
     print(message, flush=True)
 
 
-def run_command(cmd, cwd=None):
+def run_command(cmd, cwd=None, env=None):
     try:
-        result = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE,
+        result = subprocess.run(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, timeout=600)
         return result.returncode == 0, result.stdout, result.stderr
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -341,15 +344,50 @@ def _validate_source(stage):
         raise UpdateError("Release documentation is missing")
 
 
-def _check_command(runner, command, cwd, gate, logger):
+def _check_command(runner, command, cwd, gate, logger, env=None):
     try:
-        ok, stdout, stderr = runner([str(part) for part in command], cwd=str(cwd))
+        options = {"cwd": str(cwd)}
+        if env is not None:
+            options["env"] = env
+        ok, stdout, stderr = runner([str(part) for part in command], **options)
     except Exception as exc:
         raise UpdateError(gate + " failed: " + str(exc)) from exc
     if not ok:
         logger(gate + " output: " + (stderr or stdout or "no output"))
         raise UpdateError(gate + " failed")
     return stdout, stderr
+
+
+def _diagnostic_receipt(config_dir, nonce):
+    """Expected runtime acknowledgement of the exact selected evidence."""
+    config = Path(config_dir).absolute()
+    return {"contract": "ds-ev-updater-evidence-v1", "config_dir": str(config), "nonce": nonce,
+            "sha256": {name: hashlib.sha256(_regular_file(config / name, "diagnostic evidence").read_bytes()).hexdigest()
+                       for name in DIAGNOSTIC_EVIDENCE_FILES}}
+
+
+def _check_diagnostics(runner, diagnostics, context, log_dir, gate, logger):
+    """Require evidence-aware diagnostics; legacy zero exit is insufficient."""
+    nonce = uuid.uuid4().hex
+    expected = _diagnostic_receipt(context, nonce)
+    environment = {name: value for name, value in os.environ.items() if not name.startswith("DS_")}
+    command = [sys.executable, diagnostics, "--updater-evidence", "--config-dir", context,
+               "--evidence-nonce", nonce, "--log-dir", log_dir]
+    migration = ("protected updater-evidence v1 is required; migrate legacy installed diagnostics "
+                 "through a trusted maintenance procedure before updating")
+    try:
+        stdout, _ = _check_command(runner, command, context, gate, logger, env=environment)
+    except UpdateError as exc:
+        raise UpdateError(str(exc) + "; " + migration) from exc
+    receipts = [line[len(DIAGNOSTIC_EVIDENCE_PREFIX):] for line in (stdout or "").splitlines()
+                if line.startswith(DIAGNOSTIC_EVIDENCE_PREFIX)]
+    try:
+        if len(receipts) != 1 or json.loads(receipts[0]) != expected:
+            raise ValueError("missing or mismatched evidence receipt")
+        if _diagnostic_receipt(context, nonce) != expected:
+            raise ValueError("selected evidence changed during diagnostics")
+    except (ValueError, OSError) as exc:
+        raise UpdateError(gate + " failed: " + str(exc) + "; " + migration) from exc
 
 
 def _prepare_deployment(stage, destination, active_config=None):
@@ -453,23 +491,23 @@ def _run_update_locked(install_dir=None, source_dir=None, config_path=None, *, r
             trusted_tools.mkdir()
             shutil.copy2(rollback, trusted_tools / "rollback.sh")
             shutil.copy2(helper, trusted_tools / "backup_restore.py")
-            # Stage/deployed diagnostics use copied current vehicle evidence.
-            # Current diagnostics retain their existing evidence semantics for
-            # compatibility with previously installed diagnostic scripts.
+            # Every diagnostic gate reads the same protected copy of current
+            # evidence. Legacy diagnostics without the strict receipt contract
+            # must be migrated separately; ambiguous evidence cannot pass.
             context = temporary / "diagnostics-context"
-            context.mkdir()
+            context.mkdir(mode=0o700)
             for name in REQUIRED_CONFIGS:
                 shutil.copy2(active / "config" / name, context / name)
-            _check_command(runner, [sys.executable, diagnostics, "--log-dir", temporary / "current-logs"],
-                           context, "Current diagnostics", logger)
+            _check_diagnostics(runner, diagnostics, context, temporary / "current-logs",
+                               "Current diagnostics", logger)
             archive = temporary / "payload.tar.gz"
             download_archive(policy, archive, opener=opener)
             logger("Authenticated release archive downloaded and SHA-256 verified")
             stage = extract_archive(archive, temporary / "staging",
                                     policy["max_extracted_bytes"], policy["max_archive_members"])
             _validate_source(stage)
-            _check_command(runner, [sys.executable, stage / "scripts/diagnostics.py", "--config-dir", context, "--log-dir", temporary / "staged-logs"],
-                           context, "Staged diagnostics", logger)
+            _check_diagnostics(runner, stage / "scripts/diagnostics.py", context, temporary / "staged-logs",
+                               "Staged diagnostics", logger)
             for generated in (stage / "build", stage / "ds_core/bin", stage / "ds_core/lib"):
                 if generated.exists():
                     shutil.rmtree(generated)
@@ -501,8 +539,8 @@ def _run_update_locked(install_dir=None, source_dir=None, config_path=None, *, r
                 deployer(layout, install)
                 if backup_restore.tree_manifest(install) != expected:
                     raise UpdateError("Deployed files failed verification")
-                _check_command(runner, [sys.executable, install / "bin/diagnostics.py", "--config-dir", context, "--log-dir", temporary / "deployed-logs"],
-                               context, "Post-deployment diagnostics", logger)
+                _check_diagnostics(runner, install / "bin/diagnostics.py", context, temporary / "deployed-logs",
+                                   "Post-deployment diagnostics", logger)
                 if backup_restore.tree_manifest(install) != expected:
                     raise UpdateError("Deployed software changed during diagnostics")
             except Exception as exc:

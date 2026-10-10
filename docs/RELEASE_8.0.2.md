@@ -40,6 +40,14 @@ separate administrator operation.
   scripts, compiled artifacts, and a nonempty registered CTest suite. Current
   and staged diagnostics, staged configuration/build, and staged tests must pass
   before any deployed software is replaced.
+- Bind all three diagnostic gates to a protected copy of the installed safety
+  configuration with an explicit updater evidence contract. Remove all `DS_*`
+  variables from diagnostic subprocess environments; strict diagnostics ignore
+  temporary fixtures, simulated presets, and environment measurements, and
+  prohibit measurement CLI overrides. Require one fresh nonce-bound receipt
+  identifying the selected directory and SHA-256 of all four safety documents.
+  Recheck the evidence hashes after each process; legacy zero exit status or a
+  missing/mismatched receipt cannot satisfy a gate.
 - Validate the entire gzip/tar stream before writing staged members. Reject
   absolute/traversal paths, links, devices/FIFOs, sparse/unsupported types,
   privileged permission bits, duplicate paths, file/directory collisions, excess
@@ -56,6 +64,14 @@ separate administrator operation.
   snapshot with the pre-update installation; a zero exit status alone cannot
   satisfy the gate. Copy the trusted rollback helper outside the replaced tree
   and restore the exact snapshot identifier on failure.
+- Require root ownership and no group/other write permissions throughout backup
+  storage, snapshots, manifests, payload files, and their ancestors in production.
+  A root-owned sticky `/tmp` or `/var/tmp` is permitted above a private root-owned
+  anchor; higher ancestors still require protected root ownership.
+  Check existing storage before use and again before restoration can delete live
+  files. New storage is private and manifests use explicit `0600` permissions.
+  Refuse installed metadata incompatible with protected exact-restoration copies;
+  never silently repair ownership or modes on existing software or backups.
 - Serialize updater instances using an external lock. After copying, verify the
   deployment against its prepared manifest and run deployed diagnostics. Any
   recoverable deployment or post-check failure returns nonzero even when
@@ -65,17 +81,25 @@ separate administrator operation.
 
 ## Diagnostic compatibility
 
-Current installed diagnostics retain their existing CLI and evidence precedence,
-including configured `DS_*` overrides and the existing `/tmp/vehicle_status.json`
-behavior. The v8.0.1 script does not support `--config-dir`, so that new argument
-is used only for staged and deployed v8.0.2 checks. Those checks use a copied
-current configuration directory and cannot substitute the payload's simulated
-vehicle fixture. Diagnostic failure still blocks deployment.
+Updater execution always requires `--updater-evidence --config-dir <protected
+copy> --evidence-nonce <fresh challenge> --log-dir <private logs>`, including the
+current installed diagnostic gate before any download. The four selected safety
+documents are `install_policy.json`, `vehicle_status.json`,
+`vehicle_profiles.json`, and `safety_thresholds.json`. Vehicle measurements come
+from the top-level installed status document. Neither `/tmp/vehicle_status.json`,
+the downloaded archive's vehicle configuration, `simulated_presets`, nor `DS_*`
+environment values can replace that evidence. Strict evidence files/directories
+must be owned by the process owner and protected from other writers. Production
+root execution checks root ownership throughout their ancestry, allowing sticky
+`/tmp` or `/var/tmp` only above a private root-owned temporary anchor.
 
-`diagnostics.py --config-dir` provides an exclusive configuration/status source;
-the legacy default search behavior is unchanged. An explicit `--log-dir` now
-routes logs exclusively to that directory so staged validation does not write
-live or checkout logs. These additions change diagnostic I/O, not battery checks.
+An older installed diagnostic script that rejects these arguments or returns no
+matching evidence receipt blocks updating with a migration requirement. It must
+be upgraded through a separately trusted maintenance procedure; there is no
+legacy compatibility fallback for updater gates. Ordinary diagnostic execution
+outside strict updater mode preserves the legacy CLI, environment, and preset
+behavior. Explicit `--log-dir` routes logs exclusively to that directory, keeping
+staged validation out of live or checkout logs. Safety calculations are unchanged.
 
 ## Regression and verification matrix
 
@@ -86,7 +110,10 @@ live or checkout logs. These additions change diagnostic I/O, not battery checks
 | Traversal, absolute paths, links, unsupported types, collisions, bombs | Reject before staged extraction | Focused unittest regressions |
 | Missing source or unsafe git policy | Nonzero; checkout/live software unchanged | Focused unittest regressions |
 | Missing/failing current or staged diagnostics / required command | Nonzero; no deployment | Focused unittest regressions |
+| Healthy temporary fixture, environment or preset over unsafe installed evidence | Installed evidence fails; no download/deployment | Real diagnostics plus focused subprocess regressions |
+| Legacy zero exit, unsupported contract, wrong/duplicate receipt, changed evidence | Migration failure before deployment; post-deployment failure restores verified snapshot | Focused unittest regressions |
 | Missing/failing/lying backup; unsafe/corrupt snapshot | Nonzero; no deployment | Focused unittest regressions |
+| Writable or unauthorized storage/ancestor/snapshot/manifest/payload | Reject before backup use or destructive restoration; existing permissions unchanged | Focused permission regressions, including root ownership contracts |
 | Staged build/tests fail or CTest suite is empty | Nonzero; original installation intact; rollback unnecessary | Focused unittest regressions |
 | Copy/post-deployment check fails | Nonzero; exact backup restored and verified, or explicit restoration failure | Focused unittest regressions |
 | Valid SHA-pinned payload and all gates pass | Verified deployment, preserved configuration, zero status | Temporary-filesystem regressions and full staged integration |
@@ -96,12 +123,12 @@ Validation completed with these distinct outcomes:
 
 | Check | Outcome |
 |---|---|
-| New updater/backup/diagnostics I/O regressions | 66 passed, 0 skipped |
+| New updater/backup/diagnostics I/O and permission regressions | 103 passed, 0 skipped |
 | Existing Python automotive/governance suite | 11 passed |
 | Compatible existing diagnostic boundary tests | 6 passed; logs redirected to temporary storage |
 | Optional existing pybind limp/derating test | 1 skipped: optional extension absent |
 | Migrated installer and backup/rollback tests | 2 passed against temporary fixtures; no sudo/live operations |
-| Full Python unittest discovery | 86 run: 85 passed, 1 optional pybind skip; no failed or blocked checks |
+| Full Python unittest discovery | 123 run: 122 passed, 1 optional pybind skip; no failed or blocked checks |
 | v8.0.2 Release CMake build and CTest | Build passed; all 14 registered tests passed |
 | Full updater integration with real staged CMake build/CTest | Passed against a temporary installation; deployed CLI reports `DS-EV 8.0.2` and configuration is preserved |
 | Remote release availability, privileged deployment, hardware | Unrun; no production release asset is claimed |
@@ -114,6 +141,7 @@ Reproduce focused checks from the repository root:
 
 ```bash
 python3 -m unittest discover -s tests -p test_update.py -v
+python3 -m unittest discover -s tests -p test_backup_permissions.py -v
 python3 -m unittest discover -s tests -p test_ailee_automotive.py -v
 ```
 
@@ -147,8 +175,13 @@ produce/review a genuine archive with project files at the archive root, provisi
 its exact SHA-256 through a trusted channel, and configure its HTTPS URL. The
 archive must contain the required hardened updater/diagnostic/backup helpers;
 production uses the existing trusted helper for recovery, not the downloaded one.
-Previously installed helpers require a separately reviewed administrative
-bootstrap of the hardened tooling. Legacy manifest-less backups are not silently
+Previously installed diagnostics and helpers require a separately reviewed
+administrative bootstrap of the hardened tooling and evidence contract. There
+is no automatic bootstrap through the updater. Existing installed software and
+backup contents must have root ownership and no group/other write permissions;
+legacy installations made with ownership-preserving copies may require a
+reviewed metadata migration before backup is viable. The helper does not perform
+that migration automatically. Legacy manifest-less backups are not silently
 accepted as verified snapshots; retain them for separately assessed manual recovery.
 
 Run only during maintenance with services quiescent and sufficient space for the

@@ -4,9 +4,88 @@ import sys
 import json
 import argparse
 import fnmatch
+import hashlib
 import math
+from pathlib import Path
 import platform
+import re
+import stat
 import subprocess
+
+UPDATER_EVIDENCE_FILES = ("install_policy.json", "vehicle_status.json",
+                          "vehicle_profiles.json", "safety_thresholds.json")
+UPDATER_EVIDENCE_PREFIX = "DS_UPDATER_EVIDENCE_V1:"
+
+
+def _protected_evidence_path(path, directory=False):
+    """Reject evidence writable or replaceable by another local account.
+
+    A nonroot private anchor below sticky /tmp or /var/tmp may stop ancestor
+    traversal. Root execution checks every ancestor and trusts root only.
+    """
+    path = Path(path).absolute()
+    if path.resolve() != path:
+        raise ValueError("Diagnostic evidence contains a symlink/noncanonical path")
+    if (directory and not path.is_dir()) or (not directory and not path.is_file()):
+        raise ValueError("Required diagnostic evidence is missing: " + str(path))
+    owner = os.geteuid()
+    info = path.lstat()
+    if info.st_uid != owner:
+        raise ValueError("Diagnostic evidence is owned by an unauthorized account: " + str(path))
+    if info.st_mode & 0o022:
+        raise ValueError("Diagnostic evidence is writable by unauthorized accounts: " + str(path))
+    child = path
+    for parent in path.parents:
+        info = parent.lstat()
+        if not stat.S_ISDIR(info.st_mode):
+            raise ValueError("Diagnostic evidence parent is not a safe directory: " + str(parent))
+        if parent in (Path("/tmp"), Path("/var/tmp")) and info.st_mode & stat.S_ISVTX:
+            child_info = child.lstat()
+            system_owner = Path("/").lstat().st_uid if owner != 0 else 0
+            if (info.st_uid in (0, system_owner) and child_info.st_uid == owner
+                    and stat.S_ISDIR(child_info.st_mode) and not child_info.st_mode & 0o077):
+                if owner != 0:
+                    return path
+                # Sticky protection permits this temporary boundary, but root
+                # must still verify the ownership/mode of higher ancestors.
+                child = parent
+                continue
+        if info.st_uid not in (0, owner):
+            raise ValueError("Diagnostic evidence parent is owned by an unauthorized account: " + str(parent))
+        if info.st_mode & 0o022:
+            raise ValueError("Diagnostic evidence parent is writable by unauthorized accounts: " + str(parent))
+        child = parent
+    return path
+
+
+def _load_updater_evidence(config_dir, nonce):
+    """Load one protected source; neither fixtures nor overrides participate."""
+    config = _protected_evidence_path(config_dir, directory=True)
+    documents = {}
+    digests = {}
+    roots = {"install_policy.json": "install_policy", "vehicle_profiles.json": "supported_vehicles",
+             "safety_thresholds.json": "safety_thresholds"}
+    for name in UPDATER_EVIDENCE_FILES:
+        path = _protected_evidence_path(config / name)
+        data = path.read_bytes()
+        document = json.loads(data)
+        if not isinstance(document, dict):
+            raise ValueError("Required diagnostic evidence must be an object: " + name)
+        if name in roots and (not isinstance(document.get(roots[name]), dict) or not document[roots[name]]):
+            raise ValueError("Required diagnostic configuration is empty/invalid: " + name)
+        documents[name] = document
+        digests[name] = hashlib.sha256(data).hexdigest()
+    status = documents["vehicle_status.json"]
+    if not all(isinstance(status.get(field), str) and status[field]
+               for field in ("model", "firmware_version")):
+        raise ValueError("Required vehicle model/firmware evidence is missing")
+    for field in ("battery_soh", "temperature_c", "voltage_v", "soc"):
+        value = status.get(field)
+        if type(value) not in (int, float) or not math.isfinite(value):
+            raise ValueError("Required finite vehicle evidence is missing: " + field)
+    receipt = {"contract": "ds-ev-updater-evidence-v1", "config_dir": str(config),
+               "nonce": nonce, "sha256": digests}
+    return documents, receipt
 
 def log_message(msg, log_paths=None):
     """Logs a message to stdout and specified log files."""
@@ -89,7 +168,25 @@ def main():
     parser.add_argument("--log-dir", type=str, help="Alternative log directory")
     parser.add_argument("--config-dir", type=str,
                         help="Use only this diagnostics configuration and vehicle status directory")
+    parser.add_argument("--updater-evidence", action="store_true",
+                        help="Validate protected top-level config evidence only; ignore DS_* and presets")
+    parser.add_argument("--evidence-nonce", type=str,
+                        help="Updater evidence-contract challenge (32 hexadecimal characters)")
     args = parser.parse_args()
+    evidence_documents = evidence_receipt = None
+    if args.updater_evidence:
+        if not args.config_dir or not args.log_dir:
+            parser.error("--updater-evidence requires explicit --config-dir and --log-dir")
+        if not args.evidence_nonce or not re.fullmatch(r"[0-9a-f]{32}", args.evidence_nonce):
+            parser.error("--updater-evidence requires a valid --evidence-nonce")
+        if any(getattr(args, field) is not None for field in ("model", "firmware", "soh", "temp", "voltage", "soc")):
+            parser.error("Vehicle overrides are prohibited by the updater evidence contract")
+        try:
+            evidence_documents, evidence_receipt = _load_updater_evidence(args.config_dir, args.evidence_nonce)
+        except (OSError, ValueError) as exc:
+            parser.error("Untrustworthy updater diagnostic evidence: " + str(exc))
+    elif args.evidence_nonce is not None:
+        parser.error("--evidence-nonce requires --updater-evidence")
 
     # Determine paths and search directories
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -123,16 +220,18 @@ def main():
     log_message(f"Host OS detected: {platform.system()} {platform.release()}", log_paths)
     log_message(f"Python Version detected: {python_version}", log_paths)
 
-    policy_path = find_file("install_policy.json", search_dirs)
-    if not policy_path:
-        # Fallback if policy is not yet deployed
-        policy_path = find_file("config/install_policy.json", search_dirs)
-
     policy = {}
-    if policy_path:
-        policy_data = load_json(policy_path)
-        if policy_data:
-            policy = policy_data.get("install_policy", {})
+    if evidence_documents is not None:
+        policy = evidence_documents["install_policy.json"]["install_policy"]
+    else:
+        policy_path = find_file("install_policy.json", search_dirs)
+        if not policy_path:
+            # Fallback if policy is not yet deployed
+            policy_path = find_file("config/install_policy.json", search_dirs)
+        if policy_path:
+            policy_data = load_json(policy_path)
+            if policy_data:
+                policy = policy_data.get("install_policy", {})
 
     # Check target OS
     allowed_os = policy.get("target_os", ["linux", "darwin"])
@@ -160,25 +259,30 @@ def main():
 
     # 3. Read Vehicle Status (Simulated or Real)
     # Priority: /tmp/vehicle_status.json -> config/vehicle_status.json in search dirs
-    status_file = (os.path.join(os.path.abspath(args.config_dir), "vehicle_status.json")
-                   if args.config_dir else "/tmp/vehicle_status.json")
-    if not os.path.exists(status_file):
-        status_file = find_file("vehicle_status.json", search_dirs)
-    if not status_file:
-        status_file = find_file("config/vehicle_status.json", search_dirs)
-
     status = {}
-    if status_file:
-        status_data = load_json(status_file)
-        if status_data:
-            status = status_data
-            log_message(f"Loaded vehicle status from: {status_file}", log_paths)
+    if evidence_documents is not None:
+        status_file = os.path.join(os.path.abspath(args.config_dir), "vehicle_status.json")
+        status = evidence_documents["vehicle_status.json"]
+        log_message(f"Loaded protected updater vehicle status from: {status_file}", log_paths)
+    else:
+        status_file = (os.path.join(os.path.abspath(args.config_dir), "vehicle_status.json")
+                       if args.config_dir else "/tmp/vehicle_status.json")
+        if not os.path.exists(status_file):
+            status_file = find_file("vehicle_status.json", search_dirs)
+        if not status_file:
+            status_file = find_file("config/vehicle_status.json", search_dirs)
+        if status_file:
+            status_data = load_json(status_file)
+            if status_data:
+                status = status_data
+                log_message(f"Loaded vehicle status from: {status_file}", log_paths)
 
     # First determine the target model (arg takes priority, then env, then top-level status json)
-    model = args.model or os.environ.get("DS_MODEL") or status.get("model", "Unknown")
+    overrides = {} if args.updater_evidence else os.environ
+    model = args.model or overrides.get("DS_MODEL") or status.get("model", "Unknown")
 
     # If the chosen model exists in simulated_presets, use its preset as the base status!
-    presets = status.get("simulated_presets", {})
+    presets = {} if args.updater_evidence else status.get("simulated_presets", {})
     if model in presets:
         log_message(f"Applying simulated status preset for model: {model}", log_paths)
         status_base = presets[model]
@@ -186,22 +290,22 @@ def main():
         status_base = status
 
     # Apply overrides (Env variables -> base status values)
-    firmware_version = os.environ.get("DS_FIRMWARE", status_base.get("firmware_version", status_base.get("firmware", "Unknown")))
+    firmware_version = overrides.get("DS_FIRMWARE", status_base.get("firmware_version", status_base.get("firmware", "Unknown")))
     battery_soh = status_base.get("battery_soh", 0.0)
-    if "DS_SOH" in os.environ:
-        try: battery_soh = float(os.environ["DS_SOH"])
+    if "DS_SOH" in overrides:
+        try: battery_soh = float(overrides["DS_SOH"])
         except ValueError: pass
     temperature_c = status_base.get("temperature_c", 0.0)
-    if "DS_TEMP_C" in os.environ:
-        try: temperature_c = float(os.environ["DS_TEMP_C"])
+    if "DS_TEMP_C" in overrides:
+        try: temperature_c = float(overrides["DS_TEMP_C"])
         except ValueError: pass
     voltage_v = status_base.get("voltage_v", 0.0)
-    if "DS_VOLTAGE_V" in os.environ:
-        try: voltage_v = float(os.environ["DS_VOLTAGE_V"])
+    if "DS_VOLTAGE_V" in overrides:
+        try: voltage_v = float(overrides["DS_VOLTAGE_V"])
         except ValueError: pass
     soc = status_base.get("soc", 0.0)
-    if "DS_SOC" in os.environ:
-        try: soc = float(os.environ["DS_SOC"])
+    if "DS_SOC" in overrides:
+        try: soc = float(overrides["DS_SOC"])
         except ValueError: pass
 
     # CLI args override everything
@@ -220,15 +324,17 @@ def main():
                 f"  SOC:              {soc}%", log_paths)
 
     # 4. Load vehicle profiles and thresholds
-    profiles_path = find_file("vehicle_profiles.json", search_dirs) or find_file("config/vehicle_profiles.json", search_dirs)
-    thresholds_path = find_file("safety_thresholds.json", search_dirs) or find_file("config/safety_thresholds.json", search_dirs)
-
-    if not profiles_path or not thresholds_path:
-        log_message("CRITICAL: Configuration files (profiles/thresholds) could not be located.", log_paths)
-        sys.exit(1)
-
-    profiles_data = load_json(profiles_path)
-    thresholds_data = load_json(thresholds_path)
+    if evidence_documents is not None:
+        profiles_data = evidence_documents["vehicle_profiles.json"]
+        thresholds_data = evidence_documents["safety_thresholds.json"]
+    else:
+        profiles_path = find_file("vehicle_profiles.json", search_dirs) or find_file("config/vehicle_profiles.json", search_dirs)
+        thresholds_path = find_file("safety_thresholds.json", search_dirs) or find_file("config/safety_thresholds.json", search_dirs)
+        if not profiles_path or not thresholds_path:
+            log_message("CRITICAL: Configuration files (profiles/thresholds) could not be located.", log_paths)
+            sys.exit(1)
+        profiles_data = load_json(profiles_path)
+        thresholds_data = load_json(thresholds_path)
     if profiles_data is None or thresholds_data is None:
         log_message("CRITICAL: Configuration files could not be parsed.", log_paths)
         sys.exit(1)
@@ -310,8 +416,18 @@ def main():
         log_message("Installation or execution blocked for vehicle safety.", log_paths)
         sys.exit(4)
 
+    if evidence_receipt is not None:
+        try:
+            _, current_receipt = _load_updater_evidence(args.config_dir, args.evidence_nonce)
+            if current_receipt != evidence_receipt:
+                raise ValueError("Diagnostic evidence changed during validation")
+        except (OSError, ValueError) as exc:
+            log_message("CRITICAL: Untrustworthy updater diagnostic evidence: " + str(exc), log_paths)
+            sys.exit(1)
     log_message("✓ All health, temperature, voltage, and SOC metrics are within safe boundaries.", log_paths)
     log_message("=== Pre-Flight Diagnostics Completed Successfully ===", log_paths)
+    if evidence_receipt is not None:
+        print(UPDATER_EVIDENCE_PREFIX + json.dumps(evidence_receipt, sort_keys=True))
     sys.exit(0)
 
 if __name__ == "__main__":
