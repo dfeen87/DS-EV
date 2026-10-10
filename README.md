@@ -9,10 +9,10 @@
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://isocpp.org/)
 [![Status: Production Ready](https://img.shields.io/badge/Status-Production%20Ready-green.svg)]()
 [![Hardened](https://img.shields.io/badge/Hardened-Edition%20Ready-Purple.svg)]()
-[![Version](https://img.shields.io/badge/Version-8.0.1-blue.svg)]()
+[![Version](https://img.shields.io/badge/Version-8.0.2-blue.svg)]()
 [![CI](https://github.com/dfeen87/DS-EV/actions/workflows/ci.yml/badge.svg)](https://github.com/dfeen87/DS-EV/actions/workflows/ci.yml)
 
-**Current release: DS-EV v8.0.1.** This compatible hardening release preserves raw sensor faults, enforces current protection ceilings, and rejects malformed horsepower-governance evidence. See [the v8.0.1 engineering report](docs/RELEASE_8.0.1.md) and [prioritized remediation backlog](docs/POST_BEDROCK_REMEDIATION_BACKLOG.md). The [historical v8.0.0 BEDROCK report](docs/RELEASE_8.0.0.md) is preserved. Software test success is not vehicle hardware validation or safety certification.
+**Current development version: DS-EV v8.0.2.** This compatible updater hardening release requires an authenticated HTTPS payload, passing diagnostics, a staged build, and a verified backup before deployment. See [the v8.0.2 engineering report](docs/RELEASE_8.0.2.md) and [prioritized remediation backlog](docs/POST_BEDROCK_REMEDIATION_BACKLOG.md). The [v8.0.1 report](docs/RELEASE_8.0.1.md) and [v8.0.0 BEDROCK report](docs/RELEASE_8.0.0.md) remain historical records. Software test success is not vehicle hardware validation or safety certification.
 
 DS-EV is a production-ready, high-performance battery and power management suite for electric vehicles. By treating batteries as dual-state systems—where physical metrics (like voltage, current, and temperature) and historical stress tracking are dynamically coupled—we achieve earlier degradation detection, better health prediction, and optimized charging strategies.
 
@@ -1046,7 +1046,7 @@ This provides torque/regen optimization insights, stress‑aware driving guidanc
 make update
 ```
 
-**Note on Updater Limitations:** The v8.0.1 release currently has no uploaded `payload.tar.gz` asset. The updater first attempts Git-based updating. When falling back, it may use a local mock archive or construct a simulated archive from the existing source tree. A successful simulated update ensures continuity of the local tooling but does not represent a successfully downloaded or installed genuine remote software update. Furthermore, the remote fallback code currently contains an unsupported `timeout` argument in `urllib.request.urlretrieve` that prevents the download from succeeding, which is an existing known defect.
+**Updater requirements:** The published v8.0.1 release has no `payload.tar.gz` asset. v8.0.2 rejects unavailable assets, missing or mismatched SHA-256 evidence, and all simulated/local mock fallbacks. Git updates are disabled because the former `git pull` mutated the active tree before backup. An administrator must configure a genuine HTTPS release asset and its independently trusted SHA-256 digest; the shipped `sha256: null` deliberately blocks updates until that evidence exists. Deployment uses verified backups and recoverable file copying, without atomic or power-loss guarantees. See [release requirements and caveats](docs/RELEASE_8.0.2.md).
 
 NOTE: The install.log file records build and installation details only; vehicle‑specific information is generated dynamically at runtime and does not require updates to the install log.
 

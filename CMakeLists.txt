@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.15)
 
 project(
     DS_Battery_Enhancement
-    VERSION 8.0.1
+    VERSION 8.0.2
     DESCRIPTION "DS Theory Battery Management & BMS Middleware"
     LANGUAGES CXX
 )
@@ -265,7 +265,7 @@ set_target_properties(ds_enhancer PROPERTIES
 if(DS_BUILD_TESTS)
     add_test(NAME test_cli_version COMMAND ds_enhancer --version)
     set_tests_properties(test_cli_version PROPERTIES
-        PASS_REGULAR_EXPRESSION "DS-EV 8\\.0\\.1"
+        PASS_REGULAR_EXPRESSION "DS-EV 8\\.0\\.2"
     )
 endif()
 

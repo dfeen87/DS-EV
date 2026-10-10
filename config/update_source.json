@@ -1,8 +1,12 @@
 {
   "update_policy": {
-    "prefer_git": true,
-    "fallback_url": "https://github.com/dfeen87/DS-EV/releases/download/v8.0.1/payload.tar.gz",
-    "local_mock_source": "/opt/ds_enhancement/remote_payload/",
+    "prefer_git": false,
+    "fallback_url": "https://github.com/dfeen87/DS-EV/releases/download/v8.0.2/payload.tar.gz",
+    "sha256": null,
+    "timeout_seconds": 5,
+    "max_download_bytes": 67108864,
+    "max_extracted_bytes": 268435456,
+    "max_archive_members": 10000,
     "auto_rollback_on_failure": true
   }
 }
