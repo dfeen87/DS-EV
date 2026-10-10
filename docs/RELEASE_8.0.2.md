@@ -180,7 +180,7 @@ update policy, and historical release records remain unchanged.
 | Check | Follow-up outcome |
 |---|---|
 | Temporary-filesystem legacy migration regressions | 44 passed; no skipped tests |
-| Full compatible Python discovery, including updater/backup/diagnostic regressions | 167 passed; no failed or skipped tests |
+| Full compatible Python discovery, including updater/backup/diagnostic regressions | 167 run, 166 passed, 1 optional pybind skip, 0 failed. |
 | Release CMake build and registered CTest suite | Build passed; 14 tests passed |
 | Deterministic `basic_integration` simulation | Passed |
 | Optional pybind11 CI build and binding smoke test | Passed with pinned pybind11 v2.12.0 |
@@ -194,8 +194,7 @@ diagnostic receipts, repeat invocation, and continued normal updater rejection
 of missing provenance, invalid diagnostics, or failed new backups. Privilege and
 ownership operations use mocks; live copies and recovery use private temporary
 fixtures. Python diagnostic processes run with `-I -B` and private scratch logs.
-The optional extension was built for this follow-up, so the earlier recorded
-optional pybind skip above no longer applies to this run. No FEEN/CUDA or
+The main Python suite still recorded one optional skip, while the separate Python extension CI job passed. No FEEN/CUDA or
 performance benchmark validation is claimed.
 
 Use [the administrator procedure](UPDATER_LEGACY_MIGRATION.md) for independent
