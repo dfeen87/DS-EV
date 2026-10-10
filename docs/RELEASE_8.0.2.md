@@ -241,3 +241,47 @@ recovery. Backups cover managed software directories, not external vehicle state
 logs, arbitrary system files, ACLs/xattrs, or running processes. This is software
 validation, without hardware, firmware deployment, timing certification, or
 automotive safety certification. No CI assertions or existing tests are weakened.
+
+### Phase 2: Post-BEDROCK Numerical, Middleware, and Fallback Integrity
+
+This phase resolves issues **PB-13, PB-14, and PB-15** from the remediation backlog, delivering improved strictness around transaction boundaries, input validation, and parameter consistency.
+
+#### 1. PB-13: Energy Ledger Overflow and Transactional Accounting
+- **Issue:** Extreme, non-physical current values (e.g., `DBL_MAX`) could overflow the middleware's raw `voltage * current` diagnostic ledger to infinity while the core DS mathematical model silently normalized the input and falsely reported stability.
+- **Fix:** Validates all input sensor values (voltage, current, temperature, SOC, and timestep) for finiteness prior to mutation. Ensures derived candidate energy metrics are calculated and checked for overflow (`std::overflow_error`). A rejected cycle safely throws an exception while completely preserving the existing persistent object state and diagnostic snapshots.
+
+#### 2. PB-14: Nominal Configuration Consistency
+- **Issue:** The advanced middleware initialization (`init_advanced`) permitted conflicting nominal capacity and voltage definitions between the outer `MiddlewareConfig` and the embedded `ds::DSConfig`, silently accepting them and driving charging/energy behaviors inconsistently.
+- **Fix:** Conflicting initialization attempts are now explicitly rejected via `std::invalid_argument`. Additionally, candidate core modules (e.g., the pack, Kalman filter) are dynamically allocated and only committed if initialization fully succeeds, preventing partially initialized or conflicting middleware states.
+
+#### 3. PB-15: Python Fallback Validation and Atomicity
+- **Issue:** The standalone Python fallback `DSEnhancerFallback.enhance_cycle` accepted non-positive timesteps (corrupting time and entropy) and `NaN` SOC (bypassing normal checks via ordered clamping) while erroneously claiming numerical stability.
+- **Fix:** The Python fallback now strictly requires strictly positive timesteps and finite values for all physical inputs. Analogous to the C++ core, the method calculates state mutations on localized candidate variables and atomically commits changes to object persistence only after successful derivation. Returns `ValueError` or `OverflowError` respectively.
+
+#### Verification
+- Additions of comprehensive C++ and Python regressions tests confirming before-and-after states.
+- Confirmed preservation of historical valid operations and backward compatibility of APIs.
+
+**Acceptance Principle Validated:** Validate before mutation. Commit only coherent state. Preserve raw evidence. Never manufacture numerical success.
+
+## Post-BEDROCK Numerical, Middleware, and Fallback Integrity
+
+This phase resolves issues **PB-13, PB-14, and PB-15** from the remediation backlog, delivering improved strictness around transaction boundaries, input validation, and parameter consistency.
+
+### 1. PB-13: Energy Ledger Overflow and Transactional Accounting
+- **Issue:** Extreme, non-physical current values (e.g., `DBL_MAX`) could overflow the middleware's raw `voltage * current` diagnostic ledger to infinity while the core DS mathematical model silently normalized the input and falsely reported stability.
+- **Fix:** Validates all input sensor values (voltage, current, temperature, SOC, and timestep) for finiteness prior to mutation. Ensures derived candidate energy metrics are calculated and checked for overflow (`std::overflow_error`). A rejected cycle safely throws an exception while completely preserving the existing persistent object state and diagnostic snapshots.
+
+### 2. PB-14: Nominal Configuration Consistency
+- **Issue:** The advanced middleware initialization (`init_advanced`) permitted conflicting nominal capacity and voltage definitions between the outer `MiddlewareConfig` and the embedded `ds::DSConfig`, silently accepting them and driving charging/energy behaviors inconsistently.
+- **Fix:** Conflicting initialization attempts are now explicitly rejected via `std::invalid_argument`. Additionally, candidate core modules (e.g., the pack, Kalman filter) are dynamically allocated and only committed if initialization fully succeeds, preventing partially initialized or conflicting middleware states.
+
+### 3. PB-15: Python Fallback Validation and Atomicity
+- **Issue:** The standalone Python fallback `DSEnhancerFallback.enhance_cycle` accepted non-positive timesteps (corrupting time and entropy) and `NaN` SOC (bypassing normal checks via ordered clamping) while erroneously claiming numerical stability.
+- **Fix:** The Python fallback now strictly requires strictly positive timesteps and finite values for all physical inputs. Analogous to the C++ core, the method calculates state mutations on localized candidate variables and atomically commits changes to object persistence only after successful derivation. Returns `ValueError` or `OverflowError` respectively.
+
+### Verification
+- Additions of comprehensive C++ and Python regressions tests confirming before-and-after states.
+- Confirmed preservation of historical valid operations and backward compatibility of APIs.
+
+**Acceptance Principle Validated:** Validate before mutation. Commit only coherent state. Preserve raw evidence. Never manufacture numerical success.
