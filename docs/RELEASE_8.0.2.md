@@ -94,8 +94,9 @@ root execution checks root ownership throughout their ancestry, allowing sticky
 `/tmp` or `/var/tmp` only above a private root-owned temporary anchor.
 
 An older installed diagnostic script that rejects these arguments or returns no
-matching evidence receipt blocks updating with a migration requirement. It must
-be upgraded through a separately trusted maintenance procedure; there is no
+matching evidence receipt blocks updating with a migration requirement. Use the
+[explicit trusted maintenance procedure](UPDATER_LEGACY_MIGRATION.md) and its
+offline, check-only `scripts/legacy_migration.py` validator; there is no
 legacy compatibility fallback for updater gates. Ordinary diagnostic execution
 outside strict updater mode preserves the legacy CLI, environment, and preset
 behavior. Explicit `--log-dir` routes logs exclusively to that directory, keeping
@@ -169,14 +170,53 @@ regression suite. This does not establish actual release-server availability.
 
 ## Deployment prerequisites and limitations
 
+### Trusted legacy maintenance migration validation
+
+The follow-up legacy migration starts from merged PR #44, main
+`919151710f0975508e487504fcd6a0ae05c12c7d`. It adds a manual runbook and an offline
+checker; the updater, diagnostics, backup/rollback algorithms, Makefile, shipped
+update policy, and historical release records remain unchanged.
+
+| Check | Follow-up outcome |
+|---|---|
+| Temporary-filesystem legacy migration regressions | 44 passed; no skipped tests |
+| Full compatible Python discovery, including updater/backup/diagnostic regressions | 167 passed; no failed or skipped tests |
+| Release CMake build and registered CTest suite | Build passed; 14 tests passed |
+| Deterministic `basic_integration` simulation | Passed |
+| Optional pybind11 CI build and binding smoke test | Passed with pinned pybind11 v2.12.0 |
+| Live privileged migration/recovery, actual remote release, hardware | Not exercised; no production installation was changed |
+
+Migration regressions verify missing/mismatched source provenance, unsafe
+ownership/permissions/lock paths, legacy receipt incompatibility, corrupt or
+unverified recovery points, failure before changes, interrupted/partial state,
+helper-only recovery, preservation of operational evidence, genuine installed
+diagnostic receipts, repeat invocation, and continued normal updater rejection
+of missing provenance, invalid diagnostics, or failed new backups. Privilege and
+ownership operations use mocks; live copies and recovery use private temporary
+fixtures. Python diagnostic processes run with `-I -B` and private scratch logs.
+The optional extension was built for this follow-up, so the earlier recorded
+optional pybind skip above no longer applies to this run. No FEEN/CUDA or
+performance benchmark validation is claimed.
+
+Use [the administrator procedure](UPDATER_LEGACY_MIGRATION.md) for independent
+trust anchors, exact commands, recovery evidence, failure conditions, and
+remaining trust/rollback limits. No source manifest, release asset, tag, or
+publication is supplied by this change.
+
 The published v8.0.1 release has no `payload.tar.gz` asset. Its absence is a real
 failure. This change does not publish a v8.0.2 release asset: an administrator must
 produce/review a genuine archive with project files at the archive root, provision
 its exact SHA-256 through a trusted channel, and configure its HTTPS URL. The
 archive must contain the required hardened updater/diagnostic/backup helpers;
 production uses the existing trusted helper for recovery, not the downloaded one.
-Previously installed diagnostics and helpers require a separately reviewed
-administrative bootstrap of the hardened tooling and evidence contract. There
+Previously installed diagnostics and helpers require the separately reviewed
+[legacy migration runbook](UPDATER_LEGACY_MIGRATION.md). It authenticates the
+maintenance source through independent manifest pins, verifies a selected
+recovery snapshot before any helper replacement, and permits only four explicit
+administrator-installed maintenance files. Whole-tree comparison preserves
+configuration, status evidence, thresholds, and operator-selected provenance.
+It reuses the hardened diagnostic receipt gate without requesting a release,
+and it cannot deploy or repair unsafe ownership/permissions. There
 is no automatic bootstrap through the updater. Existing installed software and
 backup contents must have root ownership and no group/other write permissions;
 legacy installations made with ownership-preserving copies may require a

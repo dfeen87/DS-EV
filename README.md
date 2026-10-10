@@ -1048,6 +1048,13 @@ make update
 
 **Updater requirements:** The published v8.0.1 release has no `payload.tar.gz` asset. v8.0.2 rejects unavailable assets, missing or mismatched SHA-256 evidence, and all simulated/local mock fallbacks. Git updates are disabled because the former `git pull` mutated the active tree before backup. An administrator must configure a genuine HTTPS release asset and its independently trusted SHA-256 digest; the shipped `sha256: null` deliberately blocks updates until that evidence exists. Deployment uses verified backups and recoverable file copying, without atomic or power-loss guarantees. See [release requirements and caveats](docs/RELEASE_8.0.2.md).
 
+Existing installations with legacy diagnostics or rollback helpers must first
+complete the [trusted maintenance migration](docs/UPDATER_LEGACY_MIGRATION.md).
+Its offline checker requires authenticated helper hashes, a verified recovery
+snapshot, unchanged operational configuration, and the hardened diagnostic
+receipt. Only an administrator can replace the four maintenance helpers; the
+normal updater gates remain mandatory.
+
 NOTE: The install.log file records build and installation details only; vehicle‑specific information is generated dynamically at runtime and does not require updates to the install log.
 
 ---

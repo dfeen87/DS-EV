@@ -80,7 +80,16 @@ sudo make install
 ```
 
 ### 5. `sudo make update`
-Pulls updates, stages files, runs safety checks on the update payload, takes a backup, and deploys updates safely:
+Before updating a legacy installation, complete the
+[trusted legacy maintenance migration](UPDATER_LEGACY_MIGRATION.md). Legacy
+diagnostics and timestamped backups cannot satisfy v8.0.2's evidence and verified
+recovery contracts. The migration requires independent source provenance and
+explicit administrator action; it never replaces operational configuration or
+repairs unsafe installed permissions. A missing trusted release digest still
+blocks the updater after migration.
+
+Validates an independently SHA-pinned HTTPS release, stages its build and tests,
+checks diagnostics and a verified backup, then performs recoverable file copying:
 ```bash
 sudo make update
 ```
