@@ -284,7 +284,7 @@ no-argument execution; `test_trust_learning_integrity` also supports `trust`,
 Original reproductions can be compiled against archived baseline headers, e.g.
 `git archive <baseline> include | tar -x -C <scratch>` with C++17 and
 `-I<scratch>/include`; current tests then build against current headers. The
-historical-original table in the backlog preserves exact stimuli. Raw logs and
+original reproduction entries in the backlog preserve exact stimuli. Raw logs and
 temporary probe binaries were kept under `work/`, rather than committed as
 generated artifacts. Hosted CI status is reported on the draft PR's exact head;
 local results above do not imply an unobserved remote CI outcome.
