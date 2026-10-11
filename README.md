@@ -5,20 +5,20 @@
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://isocpp.org/)
 [![Status: HIL Validation Required](https://img.shields.io/badge/Status-HIL%20Validation%20Required-orange.svg)](docs/SAFETY.md)
 [![Stage: Software Validation](https://img.shields.io/badge/Stage-Software%20Validation-blue.svg)](docs/POST_BEDROCK_REMEDIATION_BACKLOG.md)
-[![Development: 8.0.2](https://img.shields.io/badge/Development-8.0.2-blue.svg)](docs/RELEASE_8.0.2.md)
+[![Candidate: 9.0.0](https://img.shields.io/badge/Candidate-9.0.0-blue.svg)](docs/RELEASE_9.0.0.md)
 [![CI](https://github.com/dfeen87/DS-EV/actions/workflows/ci.yml/badge.svg)](https://github.com/dfeen87/DS-EV/actions/workflows/ci.yml)
 
 ## Research-Stage EV Battery Management & Control Architecture
 
-DS-EV is an actively developed C++17/Python research framework for dual-state battery modeling, health and degradation estimates, battery-aware torque and regenerative-energy logic, BMS middleware, and automotive governance reference components.
+DS-EV is an actively developed C++17/Python research framework for dual-state battery modeling, health and degradation estimates, battery-aware torque and regenerative-energy logic, BMS middleware, automotive governance reference components, and optional physical energy accounting.
 
 Engineering work focuses on input validation, raw-evidence preservation, explicit protection boundaries, regression-tested state integrity, and fail-closed software update/rollback processes. These are **software engineering practices**, not proof of vehicle safety, performance, or accuracy.
 
 > **Vehicle safety notice:** DS-EV is **not vehicle-validated, road-ready, or automotive safety-certified**. Do not connect its examples, scripts, or computed commands to a live vehicle, traction inverter, charger, brake system, or battery actuators. Use software simulation and non-actuating research environments only. Any eventual vehicle application needs independent system hazard analysis, hardware-in-the-loop (HIL) and fault-injection validation, real hardware integration testing, applicable functional-safety assessment, and qualified engineering oversight. HIL alone does not confer certification.
 
-**Version status:** `8.0.2` is the current **development target**, not a published GitHub release. The latest published release is [v8.0.1](https://github.com/dfeen87/DS-EV/releases/tag/v8.0.1). A source version string, passing CI, or development report does not prove availability of a validated deployable release.
+**Version status:** `9.0.0 — BEDROCK REFORGED: ENERGY CONTINUITY` is the current **development release candidate**, prepared in a draft PR. It is not a published release. The latest published release is [v8.0.1](https://github.com/dfeen87/DS-EV/releases/tag/v8.0.1); the [v8.0.2 report](docs/RELEASE_8.0.2.md) preserves intervening development evidence. A version string or passing CI does not establish a deployable vehicle release.
 
-**Start with:** [v8.0.2 engineering report](docs/RELEASE_8.0.2.md) · [Post-BEDROCK backlog](docs/POST_BEDROCK_REMEDIATION_BACKLOG.md) · [Safety scope](docs/SAFETY.md) · [Simulation quick start](#-simulation-only-quick-start) · [Citation](CITATION.cff)
+**Start with:** [v9.0.0 release note](docs/RELEASE_9.0.0.md) · [Fresh simulation and validation report](docs/SIMULATION_VALIDATION_9.0.0.md) · [Earlier independent audit](docs/RELEASE_READINESS_AUDIT_9.0.0.md) · [Post-BEDROCK backlog](docs/POST_BEDROCK_REMEDIATION_BACKLOG.md) · [Safety scope](docs/SAFETY.md) · [Simulation quick start](#-simulation-only-quick-start) · [Citation](CITATION.cff)
 
 ## Evidence & Release Status
 
@@ -26,11 +26,14 @@ Engineering work focuses on input validation, raw-evidence preservation, explici
 |---|---|---|
 | DS core and middleware | C++ compilation, CTest regressions, deterministic simulation, fixes to selected safety/state boundaries | Physical battery-model validation or vehicle safety |
 | Automotive AILEE/governance | C++/Python reference paths, targeted adversarial regression tests, configurable protection rules | Certification for drivetrain, brake, or charge actuation |
+| Energy Continuity | Optional directed physical-transfer records, checked joule accounting, explicit-boundary reconciliation, deterministic simulated scenarios | Sensor authenticity, complete physical observations, experimentally measured losses or regenerative recovery |
 | Python fallback/extension | Python unit tests; separate CI build and smoke test for optional pybind11 extension | Numerical equivalence of the approximate fallback to C++ |
-| Update and rollback | Authenticated-payload gates, protected evidence/backup tests, offline maintenance migration guidance | Available v8.0.2 release payload, atomic/power-loss-safe deployment |
+| Update and rollback | Authenticated-payload gates, protected evidence/backup tests, historically pinned offline maintenance migration guidance | Available v9.0.0 release payload, atomic/power-loss-safe deployment |
 | Performance and benefit | Runnable examples and local benchmark targets | Independent accuracy, battery-life, range, worst-case latency, or CPU/memory benefit claims |
 
 **Remediation status:** The [PB-01 through PB-15 matrix](docs/RECOVERY_LEARNING_AUDIT_REMEDIATION.md) records bounded software-finding closure against passing regressions, including recovery, target lifetime, audit and numerical fixes. Local rollback identity requires rebuilt consumers; durable/live-revocation APIs, regeneration attribution, audit durability/authenticity and broader physical validation remain limitations. Historical reports describe their specific phases, not current release completeness.
+
+The earlier independent audit reviewed `038653cd6600318e36276001099960dc8c523c3a`. Its release-preparation verdict does not assess the continuity code added afterward; the [fresh candidate report](docs/SIMULATION_VALIDATION_9.0.0.md) records that feature's execution and final-diff review.
 
 ---
 
@@ -40,6 +43,7 @@ Engineering work focuses on input validation, raw-evidence preservation, explici
 - [Evidence & Release Status](#evidence--release-status)
 - [Why This Matters](#-why-this-matters)
 - [Key Features](#-key-features)
+- [Energy Continuity](#energy-continuity)
 - [Performance & Validation Evidence](#performance--validation-evidence)
 - [Advanced Features & Examples](#-advanced-features--examples)
 - [DS Torque Enhancement Module](#ds-torque-enhancement-module-v20)
@@ -61,7 +65,6 @@ Engineering work focuses on input validation, raw-evidence preservation, explici
 - [Roadmap](#-roadmap)
 - [Citation](#citation)
 - [License](#license)
-- [Get Involved](#-get-involved)
 
 ---
 
@@ -93,9 +96,63 @@ The code exercises software protection contracts; it does **not** establish a pe
 - **BMS and multi-cell integration:** Chemistry profiles, state aggregation, diagnostic middleware and reference hardware-adapter boundaries.
 - **Torque and regen modeling:** Battery-aware software *recommendations*, not authorized real-vehicle commands.
 - **Automotive governance:** Reference trust/protection-envelope evaluation with adversarial regression coverage.
+- **Energy Continuity:** Opt-in physical joule accounting with explicit source/destination, event identity, evidence origin, storage changes and balance/imbalance/incomplete outcomes.
 - **Engineering validation:** C++/Python testing, state-integrity remediation, authenticated updater gates, and protected backup/restore checks.
 
 This repository is **not** a drop-in, two-line vehicle integration.
+
+---
+
+## Energy Continuity
+
+The optional layer observes physical energy evidence without changing existing DS equations, BMS accepted-cycle results, recovery recommendations or AILEE authority. It reconciles a declared boundary using `E_initial + E_in = E_final + E_out + E_dissipated`. Internal accounting uses joules; `1 kWh = 3,600,000 J`.
+
+For accepted battery observations, `Delta E_signed = V * I * dt`: positive current means discharge and negative current means charging. The BMS owns its accepted raw-current ledger. Coordinator charging totals describe the same accepted energy and must not be added to that ledger; mechanical/electrical recovery availability remains a separate estimate. Negative measured current does not prove a regenerative source.
+
+The diagram separates illustrative physical transfers (solid arrows, joules) from software evidence and governance (dotted arrows). Node names do not imply complete plant models or available hardware measurements. Loss transfers require explicit supplied evidence.
+
+```mermaid
+flowchart LR
+  subgraph Physical[Modeled physical energy paths]
+    X[External source] -->|electrical J| B[Battery pack]
+    B -->|discharge J| P[Power electronics]
+    P -->|electrical J| M[Motor]
+    M -->|mechanical J| K[Kinetic storage]
+    K -->|modeled recovery J| M
+    M -->|modeled recovery J| P
+    P -->|accepted charging J| B
+    B -->|electrical J| A[Auxiliary consumers]
+    P -->|explicit loss J| H[Thermal / dissipative sink]
+    M -->|explicit loss J| H
+  end
+  subgraph Software[Software evidence and governance]
+    BM[BMS accepted-cycle ledger]
+    RC[Recovery coordinator diagnostics]
+    T[Read-only telemetry]
+    EC[Opt-in Energy Continuity]
+    G[AILEE / host governance]
+  end
+  B -.->|V / signed I / interval evidence| BM
+  BM -.->|accepted evidence| EC
+  RC -.->|charging observation / separate estimates| EC
+  T -.->|power summary / acceptance context required| EC
+  G -.->|evidence eligibility only| EC
+```
+
+Transactions stage validated records before commit, reject malformed/nonfinite/overflowing evidence and duplicate identities, and have bounded session/reset behavior. Declared incomplete storage or transfer evidence produces **insufficient evidence**; claiming complete storage while omitting a selected node rejects as malformed. An unexplained residual is never assigned to heat, and a zero residual from dependent estimates is not independent physical validation. Core informational energies such as `energy_phi` or `energy_metric` are not physical transfer measurements.
+
+The passive adapter captures a checkpoint before the caller's existing BMS cycle and observes exactly one accepted cycle afterward. A BMS reinitialization requires a newer continuity session and a fresh checkpoint. Reconciliation balances the supplied per-event storage endpoints; it does not certify continuous physical history across events or unobserved intervals.
+
+Run the fixed-input software example:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DDS_ENABLE_PYTHON_GOVERNOR=OFF
+cmake --build build --target energy_continuity_simulation test_energy_continuity
+./build/energy_continuity_simulation
+ctest --test-dir build -R energy_continuity --output-on-failure
+```
+
+The [release note](docs/RELEASE_9.0.0.md) describes the ownership and migration contracts. The [validation report](docs/SIMULATION_VALIDATION_9.0.0.md) records actual simulated values, analytic expectations, residuals, executed checks and limitations. No output is presented as a hardware measurement or safe actuator instruction.
 
 ---
 
@@ -669,7 +726,7 @@ This completes the DS control loop:
 
 ## 🔄 Closed-Loop Energy Recovery (Battery → Torque → Braking → Battery)
 
-Version **v1.3.0** completes the DS energy control loop by treating regenerative braking as an active, battery-aware charging event.
+The earlier **v1.3.0** integration introduced the design goal of treating regenerative braking as an active, battery-aware charging event. The current overall release candidate is v9.0.0; component API versions are separate.
 
 The software models battery-side energy updates and regen recommendations subject to policy limits. This is not evidence of measured physical recovery or safe charging.
 
@@ -685,12 +742,14 @@ The DS stack exposes an optional, read-only telemetry snapshot designed to make 
 
 The telemetry struct provides a stable summary of:
 - battery state (SOC / SOH)
-- power flow (drive vs regenerative)
-- recovered energy
+- signed pack power (discharge vs all-source charging)
+- accepted all-source charging energy under its legacy `recovered_energy_kwh` name
 - key DS metrics (stress, confidence)
 - active limiting factors
 
 This interface is intended for dashboards, CAN mapping, logging, or cloud pipelines and does not participate in control decisions.
+
+A snapshot alone does not identify a newly accepted cycle, a transfer source, an elapsed interval or regenerative origin. The opt-in continuity adapter requires explicit acceptance and interval context; it never sums the cumulative snapshot with the BMS/coordinator account.
 
 Visualization, UX, and presentation remain fully owned by the automaker.
 
@@ -717,7 +776,7 @@ DS-EV/
 └── Makefile
 ```
 
-Key entry points: [DS core](include/ds_battery_core.hpp), [BMS middleware](include/ds_bms_middleware_v2.hpp), [recovery coordinator](include/ds_energy_recovery_coordinator_v1.hpp), [AILEE reference components](include/ailee_trust_layer/), [hardware adapter](src/ds_bms_hardware_adapter.hpp), [Python fallback](ds_core/python_fallback/ds_enhancer_fallback.py), and [v8.0.2 development report](docs/RELEASE_8.0.2.md).
+Key entry points: [DS core](include/ds_battery_core.hpp), [BMS middleware](include/ds_bms_middleware_v2.hpp), [recovery coordinator](include/ds_energy_recovery_coordinator_v1.hpp), [Energy Continuity](include/ds_energy_continuity.hpp), [AILEE reference components](include/ailee_trust_layer/), [hardware adapter](src/ds_bms_hardware_adapter.hpp), [Python fallback](ds_core/python_fallback/ds_enhancer_fallback.py), and [v9.0.0 release candidate report](docs/RELEASE_9.0.0.md).
 
 **Build detail:** `examples/multi_cell_pack.cpp` is retained as a reference but is excluded from the default CMake example build pending its API reconciliation. Read the [CMake targets](CMakeLists.txt) rather than assuming every example is compiled by CI.
 
@@ -733,7 +792,7 @@ The [recovery coordinator](include/ds_energy_recovery_coordinator_v1.hpp) stages
 
 ## 🛑 Regen as Controlled Charging
 
-In v1.3.0, regenerative braking is treated as a **bounded charging event**, not a passive side effect.
+The v1.3.0 design describes regenerative braking as a **bounded charging event**. Current accepted-energy accounting follows the [PB-09/PB-13 contracts](docs/RECOVERY_LEARNING_AUDIT_REMEDIATION.md), including all-source charging and separate availability estimates.
 
 Charging is dynamically constrained by:
 - state of charge headroom
@@ -844,6 +903,7 @@ cmake --build build --parallel 4
 
 ```bash
 ./build/basic_integration
+./build/energy_continuity_simulation
 ctest --test-dir build --output-on-failure
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
@@ -864,7 +924,7 @@ Outputs are **software estimates**, not measured real-vehicle battery health or 
 
 ### Software maintenance is separate and privileged
 
-Do **not** run `make install` or `make update` as part of the simulation quick start. v8.0.2 software updates require an independently pinned authenticated HTTPS payload, protected diagnostic evidence, validated backup and review. A shipped null digest deliberately blocks updates. Legacy installations require administrator-led [offline maintenance migration](docs/UPDATER_LEGACY_MIGRATION.md) first. See [updater engineering requirements](docs/RELEASE_8.0.2.md) and [installation scope](docs/INSTALL.md).
+Do **not** run `make install` or `make update` as part of the simulation quick start. Software updates require an independently pinned authenticated HTTPS payload, protected diagnostic evidence, validated backup and review. The shipped historical v8.0.2 URL and null digest deliberately block updates; no v9.0.0 payload or checksum is supplied. The administrator-led [offline maintenance migration](docs/UPDATER_LEGACY_MIGRATION.md) remains pinned to independently approved historical v8.0.2 source bytes and is not a generalized v9.0.0 installation path. See [updater engineering requirements](docs/RELEASE_8.0.2.md) and [installation scope](docs/INSTALL.md).
 
 ---
 
@@ -974,7 +1034,7 @@ cmake --build build
 ./build/basic_integration
 ```
 
-The earlier illustrative 1,000-cycle terminal transcript is not a recorded outcome of this command and has been removed. Consult the [simulation observations](docs/simulation_observations.md) for context and the [BEDROCK release reports](docs/RELEASE_8.0.1.md) for recorded regression evidence.
+The [v9.0.0 simulation and validation report](docs/SIMULATION_VALIDATION_9.0.0.md) records fresh reproducible numerical scenarios and candidate verification. The [v8.0.0 simulation observations](docs/simulation_observations.md) remain historical qualitative context; earlier [BEDROCK release reports](docs/RELEASE_8.0.1.md) retain their original regression scope.
 
 ### C++ and Python regression tests
 
@@ -1094,6 +1154,7 @@ SoC
 - **v8.0.0 BEDROCK:** Invariant review and trust-boundary integration; [engineering report](docs/RELEASE_8.0.0.md).
 - **v8.0.1 (published):** Middleware safety evidence and protective torque fixes; [release report](docs/RELEASE_8.0.1.md).
 - **v8.0.2 (development):** Fail-closed updater and backup controls, manual legacy migration validation, and further numerical/integrity remediation; [development report](docs/RELEASE_8.0.2.md).
+- **v9.0.0 BEDROCK REFORGED: ENERGY CONTINUITY (candidate):** Consolidated major-version alignment, preserved PB-01–PB-15 contracts, opt-in physical accounting and fresh deterministic simulation/validation; [release note](docs/RELEASE_9.0.0.md). No release is published by preparation.
 
 ### Open validation work
 
