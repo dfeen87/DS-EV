@@ -1,6 +1,12 @@
 # DS EV Battery Enhancement - System Architecture
 
+**Release:** 9.0.0 development candidate — BEDROCK REFORGED: ENERGY CONTINUITY.
+
 This document provides a highly detailed technical overview of the Dual-State (DS) EV Battery Enhancement software structure, detailing module boundaries, interfaces, and the closed-loop energy cycle.
+
+The diagrams describe software data flow and advisory integration. Their arrows
+are not evidence of physical energy transfers or actuator deployment. The
+research software requires independent physical and safety validation.
 
 ---
 
@@ -36,7 +42,10 @@ The software integrates high-performance physical models (C++17) with robust scr
 
 ## 🔁 The Closed-Loop Energy Cycle
 
-The key differentiator of the DS stack v8.0.1 is its closed-loop energy management cycle. Instead of treating battery state estimation, motor torque delivery, and braking energy recovery as isolated silos, they are integrated into a continuous physics-informed loop.
+The DS stack v9.0.0 preserves its existing software loop between battery state
+estimation, advisory torque limits, and recovery diagnostics. Accepted
+battery-side electrical energy remains distinct from mechanical and electrical
+recovery estimates.
 
 ```
                   +--------------------------------+
@@ -51,7 +60,7 @@ The key differentiator of the DS stack v8.0.1 is its closed-loop energy manageme
 |    DS Torque Manager      |          |    DS Regen Manager       |
 |  - Progressive derating    |          |  - High-power recovery     |
 |  - Thermal protections     |          |  - Adaptive blend ratio    |
-|  - Limp mode enforcement   |          |  - Fail-safe mechanical cut|
+|  - Limp mode guidance      |          |  - Advisory braking limits |
 +----------------------------+          +----------------------------+
                   \                                /
                    \                              /
@@ -59,24 +68,24 @@ The key differentiator of the DS stack v8.0.1 is its closed-loop energy manageme
                   +--------------------------------+
                   |       Dynamic Vehicle          |
                   |       Energy Recovery          |
-                  |  - Controlled charging updates |
+                  |  - Observed / estimated current |
                   |  - Closed-loop integration     |
                   +--------------------------------+
 ```
 
 ### 1. Battery State to Torque Delivery
-* Sensor readings are updated at 100Hz. The `DSBMSMiddleware` estimates the coupled thermodynamic state of the pack.
-* When high internal stresses ($\partial_{\mu}\Phi$) or capacity degradation are detected, the `DSTorqueManager` instantly scales back peak motor commands to prevent premature aging.
+* Callers supply sensor readings and elapsed time. The `DSBMSMiddleware` evaluates the coupled DS model and commits accepted cycles transactionally.
+* The `DSTorqueManager` derives advisory torque limits from the model; external vehicle systems retain command ownership.
 
 ### 2. Kinetics to Regenerative Braking
 * During deceleration, the driver's braking request is routed through the `DSRegenBrakingManager`.
 * Based on current SOC headroom, temperatures, and cell balances, the regen manager computes safe charge acceptance bounds.
-* High-power energy recovery is permitted ONLY if cells are warm, balanced, and healthy.
+* These are software bounds and estimates, not evidence that a physical recovery event occurred.
 
 ### 3. Energy Recovery to Battery State
-* The recovered energy is converted into charging current ($I_{\text{regen}}$) and fed back into the `DSBMSMiddleware` update cycle.
-* This updates the informational state (minimizing entropy growth) and updates physical State of Charge.
-* **Outcome**: A safe, thermodynamics-compliant loop that reduces dependence on external grid charging while strictly preventing battery damage.
+* The recovery coordinator selects measured or estimated current according to its existing mode, limits, and smoothing before a middleware cycle.
+* Only a successful middleware cycle records accepted raw-current battery-side energy. Supplied SOC and abstract DS state do not independently measure stored physical energy.
+* Accepted negative current identifies charging; independent source evidence is required to attribute it to regeneration. Software tests do not establish physical efficiency, battery protection, or reduced grid consumption.
 
 ---
 
@@ -119,3 +128,22 @@ Mechanical and electrical recovery estimates are separate diagnostics and are
 never added as extra energy to the BMS ledger. Measured negative current
 identifies charging; it does not identify its source as regeneration. Estimated
 mode is a simulation estimate, without physical regeneration attribution.
+
+## Optional physical Energy Continuity
+
+The v9.0.0 opt-in observer reconciles explicitly identified physical transfers
+and supplied storage changes without modifying middleware, recovery, trust, or
+control outcomes. Its boundary identity is
+
+$$E_{\mathrm{initial}}+E_{\mathrm{in}}=
+E_{\mathrm{final}}+E_{\mathrm{out}}+E_{\mathrm{dissipated}}.$$
+
+The layer uses joules and explicit checked kWh conversion. It reports incomplete
+evidence separately from balance/imbalance; a missing transfer is not inferred
+from a residual. DS `energy_psi`, `energy_phi`, and `energy_metric` remain abstract
+model variables outside this physical accounting. Telemetry and AILEE governance
+are data consumers, not physical nodes, and cannot create accepted measurements.
+
+See [RELEASE_9.0.0.md](RELEASE_9.0.0.md) for the data-flow diagram and evidence
+contract, and [SIMULATION_VALIDATION_9.0.0.md](SIMULATION_VALIDATION_9.0.0.md) for
+executed software-validation results.

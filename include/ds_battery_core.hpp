@@ -1,6 +1,6 @@
 /*
  * ============================================================================
- * DS BATTERY ENHANCEMENT LIBRARY v5.0
+ * DS BATTERY ENHANCEMENT LIBRARY v9.0.0
  * ============================================================================
  * 
  * Implementation of Don Michael Feeney Jr.'s Dual-State (DS) Theory
@@ -9,7 +9,7 @@
  * Based on: "Mathematical Formulation of the U2→U1 Coupling in the 
  *            Dual-State Theory" (the developer, 2025)
  * 
- * UPDATES IN v5.0:
+ * HISTORICAL UPDATES IN v5.0:
  * - Version bump to 5.0.0 with integrated AILEE Automotive Governance Layer
  * 
  * ARCHITECTURE:
@@ -33,7 +33,7 @@
  * AUTHORS: Don Michael Feeney Jr. & Claude (Anthropic)
  * DATE: December 2025
  * LICENSE: Copyright (c) Don Michael Feeney Jr. Licensed under the MIT License.
- * VERSION: 1.2.0
+ * DS-EV RELEASE VERSION: 9.0.0
  * 
  * ============================================================================
  */
@@ -63,9 +63,9 @@ namespace ds {
 // VERSION INFORMATION
 // ============================================================================
 
-constexpr int DS_VERSION_MAJOR = 8;
+constexpr int DS_VERSION_MAJOR = 9;
 constexpr int DS_VERSION_MINOR = 0;
-constexpr int DS_VERSION_PATCH = 2;
+constexpr int DS_VERSION_PATCH = 0;
 
 inline std::string get_version_string() {
     return std::to_string(DS_VERSION_MAJOR) + "." +

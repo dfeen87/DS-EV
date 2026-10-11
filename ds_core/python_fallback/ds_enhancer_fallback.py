@@ -11,6 +11,8 @@ where C++ compilation is unavailable.
 import math
 from numbers import Real
 
+__version__ = "9.0.0"
+
 class DSEnhancerFallback:
     """Approximate model with an all-or-nothing, finite-state cycle contract.
 

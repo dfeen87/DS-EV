@@ -3,6 +3,7 @@ message: >-
   If you use DS-EV in your research, please cite this software using
   the metadata in this file.
 type: software
+version: 9.0.0
 title: "DS-EV: Battery Intelligence, Energy Recovery & Safety Governance"
 authors:
   - family-names: Feeney
