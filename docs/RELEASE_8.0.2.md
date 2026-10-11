@@ -241,3 +241,55 @@ recovery. Backups cover managed software directories, not external vehicle state
 logs, arbitrary system files, ACLs/xattrs, or running processes. This is software
 validation, without hardware, firmware deployment, timing certification, or
 automotive safety certification. No CI assertions or existing tests are weakened.
+
+## Subsequent numerical, middleware and fallback integrity phase
+
+This additional phase starts from merged main
+`1be4cbd8bbf6bc09b87d61619234ed85dd016fbe` and addresses PB-13, PB-14 and PB-15.
+The preceding updater/migration evidence remains intact; its statements about
+unchanged BMS/DS interfaces describe that earlier phase. The consolidated
+v8.0.2 development target remains unfinished while PB-09 through PB-12 are open.
+No release/tag, production deployment, physical hardware operation or
+safety-certification claim is added.
+
+- **PB-13:** Credit raw electrical energy only for accepted cycles. Check
+  intermediate/cumulative arithmetic, diagnostic power, every numeric diagnostic,
+  timing and counters before committing copied core/filter candidates and all
+  numerical snapshots. Rejected attempts preserve accepted history and retain
+  latest raw safety evidence. Core saturation cannot hide overflowing entropy or
+  degradation. Positive current is discharge; negative current is charging;
+  diagnostic/telemetry power now consistently uses raw accepted kW.
+- **PB-14:** Require exact advanced outer/embedded nominal agreement rather than
+  silently replacing calibrated DS values. Reject invalid configuration and
+  unusable derived constants before initialization. Failed reinitialization
+  preserves the prior complete instance; successful initialization resets the
+  session and removes disabled components. Matching calibrated configurations
+  retain direct-core behavior; ambiguous custom nominal configurations must now
+  set both copies.
+- **PB-15:** Validate inputs/configuration and complete candidate arithmetic in
+  the independent approximate Python fallback. Invalid cycles raise `ValueError`
+  without changing time, entropy, throughput, cycles, degradation or other
+  attributes. Legitimate finite clamps and valid fallback results are preserved;
+  this does not establish C++ numerical equivalence.
+
+| Phase check | Result |
+| --- | --- |
+| Release build / registered CTest suite | Passed, 16/16 |
+| Debug build / ASan, UBSan and leak-detection CTest suite | Passed, 16/16; no sanitizer diagnostics |
+| Full Python discovery with optional extension available | Passed, 188/188; no skips |
+| Pinned pybind11 extension build, binding smoke and targeted integrity probes | Passed |
+| Pinned FEEN v3.8.1 accounting/integration build and CTest | Passed, 2/2; copy/history compatibility verified |
+| Basic integration and RAPS simulations | Passed in Release and sanitized Debug |
+| Baseline valid DS mathematical probe | 883 output lines exactly unchanged |
+| Approximate fallback compatibility | 2000 implementation and 1000 independent review cycles exactly matched baseline |
+| Available static analysis compared with baseline | No new findings; four existing cppcheck performance findings still produce exit 1 |
+
+See [the complete phase engineering evidence](NUMERICAL_MIDDLEWARE_FALLBACK_REMEDIATION.md)
+for exact before/after measurements, failed assertions, accounting/configuration
+contracts, atomicity boundaries, commands, compatibility decisions and remaining
+risks. Generic charging telemetry is not source-tagged recovered energy; PB-09
+must stage coordinator history and distinguish battery-side accepted energy
+from available mechanical estimates. Existing optional telemetry binding,
+adapter exception-contract and Kalman modeling limitations are reported there.
+The updater, rollback, production configuration, historical v8.0.0/v8.0.1 records
+and release version numbers are unchanged by this phase.

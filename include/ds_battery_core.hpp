@@ -114,6 +114,11 @@ struct DSConfig {
         if (phi_decay_rate < 0.0 || phi_decay_rate > 1.0) return false;
         if (nominal_capacity_ah <= 0.0) return false;
         if (nominal_voltage <= 0.0) return false;
+        // These configuration constants are consumed before division and
+        // recommendation publication; infinity must not become a zero cycle
+        // count or a misleadingly usable charging configuration.
+        if (!std::isfinite(2.0 * nominal_capacity_ah) ||
+            !std::isfinite(1.05 * nominal_voltage)) return false;
         if (max_temperature <= min_temperature) return false;
         if (max_current <= 0.0) return false;
         if (entropy_weight < 0.0 || entropy_weight > 1.0) return false;
@@ -302,6 +307,11 @@ private:
         double current_contrib = std::abs(state.current) / 100.0;
         
         state.entropy += dt * config_.entropy_weight * (temp_contrib + current_contrib);
+        // Saturation must not turn overflow into apparently valid state. This
+        // work is performed on update()'s candidate, before its commit.
+        if (!std::isfinite(state.entropy)) {
+            throw std::overflow_error("DS entropy accumulation overflow");
+        }
         state.entropy = std::min(state.entropy, 1.0);
         
         double charge_delta = std::abs(state.current) * dt / 3600.0;
@@ -314,6 +324,9 @@ private:
         double thermal_degradation = temp_contrib * 0.0005 * dt;
         
         state.degradation += base_degradation + thermal_degradation;
+        if (!std::isfinite(state.degradation)) {
+            throw std::overflow_error("DS degradation accumulation overflow");
+        }
         state.degradation = std::clamp(state.degradation, 0.0, 1.0);
         state.capacity_fade = state.degradation;
         
