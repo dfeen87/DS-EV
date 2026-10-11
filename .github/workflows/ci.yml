@@ -31,7 +31,9 @@ jobs:
         run: python3 -m unittest discover -s tests -p 'test_*.py' -v
 
       - name: Run simulation smoke test
-        run: ./build/basic_integration
+        run: |
+          ./build/basic_integration
+          ./build/energy_continuity_simulation
 
   build-test-python-extension:
     runs-on: ubuntu-latest

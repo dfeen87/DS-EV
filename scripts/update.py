@@ -158,7 +158,7 @@ def download_archive(policy, destination, opener=None):
     deadline = time.monotonic() + timeout
     opener = opener or urllib.request.build_opener(HTTPSOnlyRedirect(deadline))
     open_request = opener.open if hasattr(opener, "open") else opener
-    request = urllib.request.Request(url, headers={"User-Agent": "DS-EV-updater/8.0.2",
+    request = urllib.request.Request(url, headers={"User-Agent": "DS-EV-updater/9.0.0",
                                                   "Accept-Encoding": "identity"})
     destination = Path(destination)
     try:

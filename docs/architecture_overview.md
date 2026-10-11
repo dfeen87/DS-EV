@@ -1,9 +1,13 @@
 # DS Battery Management System
 ## Architecture Overview
 
-**Version:** 8.0.2
+**Version:** 9.0.0 development candidate — BEDROCK REFORGED: ENERGY CONTINUITY
 **Audience:** OEMs, Tier-1 suppliers, system architects, safety engineers  
 **Scope:** Conceptual and software architecture (not hardware schematics)
+
+This research software has not been validated as a certified vehicle safety
+controller. The diagrams below describe software interfaces and ownership;
+their arrows do not establish physical energy transfers.
 
 ---
 
@@ -259,6 +263,26 @@ It is designed to be **understandable, auditable, and adaptable** across
 manufacturers and platforms.
 
 ---
+
+## 12. Optional Energy Continuity
+
+The v9.0.0 Energy Continuity Layer is a passive, opt-in accounting layer for
+explicit physical boundaries. It reconciles identified transfers, supplied
+storage changes, and explicit dissipative transfers in joules. It reports
+insufficient evidence when observations are incomplete and never converts an
+unexplained residual into a heat measurement.
+
+The middleware remains authoritative for accepted raw-current energy; recovery
+mechanical/electrical estimates remain separate from accepted battery charging.
+Positive pack current means discharge and negative pack current means charging.
+Charging alone does not establish regenerative provenance. DS core abstract
+energy variables have no independently established mapping to this physical
+ledger. AILEE decides trust/authorization and cannot manufacture observations or
+force a physical balance. Existing vehicle-control ownership remains separate.
+
+See the [v9.0.0 release note](RELEASE_9.0.0.md) and
+[simulation and validation report](SIMULATION_VALIDATION_9.0.0.md) for the
+implemented boundaries, evidence assumptions, and tested scope.
 
 **Contact & Integration Support:**  
 Don Michael Feeney Jr.  

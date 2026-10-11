@@ -11,6 +11,9 @@ import os
 import sys
 import ctypes
 
+# Wrapper release metadata; the loaded shared library is a separate artifact.
+__version__ = "9.0.0"
+
 # Define the C-compatible struct matching ds_core/src/ds_enhancer.cpp
 class DSResult(ctypes.Structure):
     _fields_ = [

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.15)
 
 project(
     DS_Battery_Enhancement
-    VERSION 8.0.2
+    VERSION 9.0.0
     DESCRIPTION "DS Theory Battery Management & BMS Middleware"
     LANGUAGES CXX
 )
@@ -138,12 +138,15 @@ if(DS_BUILD_EXAMPLES)
     add_executable(raps_ev_stability_demo examples/raps_ev_stability_demo.cpp)
     target_link_libraries(raps_ev_stability_demo PRIVATE ds_ailee_governor)
 
+    add_executable(energy_continuity_simulation examples/energy_continuity_simulation.cpp)
+    target_link_libraries(energy_continuity_simulation PRIVATE ds_battery)
+
     # Note: multi_cell_pack.cpp currently has API mismatches and is disabled
     # add_executable(multi_cell_pack examples/multi_cell_pack.cpp)
     # target_link_libraries(multi_cell_pack PRIVATE ds_battery)
 
     install(
-        TARGETS basic_integration rest_api_server raps_ev_stability_demo
+        TARGETS basic_integration rest_api_server raps_ev_stability_demo energy_continuity_simulation
         RUNTIME DESTINATION bin/examples
     )
 endif()
@@ -165,6 +168,14 @@ if(DS_BUILD_TESTS)
             target_compile_options(${target} PRIVATE -UNDEBUG)
         endif()
     endfunction()
+
+    add_executable(test_energy_continuity tests/test_energy_continuity.cpp)
+    target_link_libraries(test_energy_continuity PRIVATE ds_battery)
+    add_test(NAME test_energy_continuity COMMAND test_energy_continuity)
+    ds_enable_test_assertions(test_energy_continuity)
+    if(DS_BUILD_EXAMPLES)
+        add_test(NAME energy_continuity_simulation COMMAND energy_continuity_simulation)
+    endif()
 
     add_executable(test_core tests/test_core.cpp)
     target_link_libraries(test_core PRIVATE ds_battery)
@@ -295,7 +306,7 @@ set_target_properties(ds_enhancer PROPERTIES
 if(DS_BUILD_TESTS)
     add_test(NAME test_cli_version COMMAND ds_enhancer --version)
     set_tests_properties(test_cli_version PROPERTIES
-        PASS_REGULAR_EXPRESSION "DS-EV 8\\.0\\.2"
+        PASS_REGULAR_EXPRESSION "DS-EV 9\\.0\\.0"
     )
 endif()
 

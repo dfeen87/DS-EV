@@ -9,6 +9,7 @@ namespace py = pybind11;
 
 PYBIND11_MODULE(ds_enhancer_pybind, m) {
     m.doc() = "pybind11 Python bindings for DS EV Battery Enhancement Software Core";
+    m.attr("__version__") = ds::get_version_string();
 
     // ========================================================================
     // Core DS Structs & Classes

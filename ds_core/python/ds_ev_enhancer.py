@@ -15,6 +15,8 @@ import sys
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 
+__version__ = "9.0.0"
+
 # Ensure local ailee package is importable
 _script_dir = os.path.dirname(os.path.abspath(__file__))
 if _script_dir not in sys.path:

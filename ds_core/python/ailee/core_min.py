@@ -206,13 +206,34 @@ class AileeTrustPipeline:
         timestamp: Optional[float] = None,
         context: Optional[Dict[str, Any]] = None,
     ) -> DecisionResult:
-        """Low level pipeline evaluation matching AILEE core interface"""
+        """Evaluate finite raw evidence; malformed inputs never enter history."""
         timestamp = timestamp or time.time()
         peer_values = peer_values or []
 
+        # Validate before threshold comparisons or clamps: NaN comparisons can
+        # otherwise select ACCEPTED, and min/max can hide nonfinite raw values.
+        try:
+            if isinstance(raw_value, bool) or isinstance(raw_confidence, bool):
+                raise ValueError("Boolean numeric evidence")
+            raw_value = float(raw_value)
+            confidence = float(raw_confidence)
+            if not math.isfinite(raw_value) or not math.isfinite(confidence):
+                raise ValueError("Nonfinite raw value or confidence")
+            if not 0.0 <= confidence <= 1.0:
+                raise ValueError("Confidence outside [0,1]")
+        except (TypeError, ValueError, OverflowError) as err:
+            return DecisionResult(
+                value=0.0, confidence_score=0.0,
+                safety_status=SafetyStatus.REJECTED,
+                grace_status=GraceStatus.NOT_APPLIED,
+                consensus_status=ConsensusStatus.NO_QUORUM,
+                used_fallback=True,
+                reasons=[f"Invalid raw trust evidence: {err}"],
+                metadata=context or {},
+            )
+
         reasons = []
         used_fallback = False
-        confidence = float(raw_confidence)
 
         if confidence < self.cfg.borderline_low:
             used_fallback = True
@@ -222,10 +243,10 @@ class AileeTrustPipeline:
         elif confidence < self.cfg.accept_threshold:
             status = SafetyStatus.BORDERLINE
             reasons.append(f"Confidence {confidence:.2f} borderline")
-            val = min(float(raw_value), self.cfg.fallback_clamp_max)
+            val = min(raw_value, self.cfg.fallback_clamp_max)
         else:
             status = SafetyStatus.ACCEPTED
-            val = float(raw_value)
+            val = raw_value
 
         val = max(self.cfg.hard_min, min(self.cfg.hard_max, val))
         self._history.append(val)

@@ -88,6 +88,15 @@ explicit administrator action; it never replaces operational configuration or
 repairs unsafe installed permissions. A missing trusted release digest still
 blocks the updater after migration.
 
+For the v9.0.0 development candidate, that maintenance migration remains an
+explicit **v8.0.2-only** authenticated source procedure. Use its independently
+approved historical revision, manifest digest, and exact helper hashes; changing
+the manifest version to v9.0.0 does not authorize newer helper bytes. This
+candidate does not supply a generalized migration or a release asset. The
+shipped `config/update_source.json` retains its historical v8.0.2 URL with
+`sha256: null`, so updates remain blocked until a real release identity and
+independently trusted digest are provisioned through the established process.
+
 Validates an independently SHA-pinned HTTPS release, stages its build and tests,
 checks diagnostics and a verified backup, then performs recoverable file copying:
 ```bash
