@@ -261,6 +261,51 @@ per-PR deltas. Reproduce using `git rev-list --count v8.0.1..HEAD`,
 final candidate. The document-only follow-up commit completes the evidence and
 README/release note without changing the frozen implementation.
 
+
+## Independent Cross-Boundary & Multi-Interval Simulation Validation
+
+**Exact reviewed source commit:** `a855c22fba1b178b752e096d34799aa386806460` (Base repository head used for independent verification campaign).
+
+**Simulation configurations:**
+Dedicated verification of independent components (Battery, PowerElectronics, Motor, KineticStore) through simulated explicitly defined energy records, tolerances set tightly (`absolute_joules = 1e-6`, `relative = 1e-9`), and exact numeric probes.
+
+**Expected analytic energy balances vs Actual software results:**
+
+| Physical Boundary | Configuration | Expected Balance | Actual Status / Residual | Outcome |
+|---|---|---|---|---|
+| **Battery** | Normal discharge with exact evidence | Balanced | Balanced / 0.0 J | PASS |
+| | Missing evidence/duplicate ID | Rejected/Imbalanced | Rejected/Imbalanced | PASS |
+| | Unrelated evidence (not independent) | InsufficientEvidence | InsufficientEvidence | PASS |
+| **Inverter** | Explicit in, out, and dissipated heat | Balanced | Balanced / 0.0 J | PASS |
+| | Missing heat transfer (incomplete energy) | Imbalanced | Imbalanced / 5.0 J | PASS |
+| | Incomplete evidence declaration | InsufficientEvidence | InsufficientEvidence | PASS |
+| **Motor** | In, mechanical out, and dissipated heat | Balanced | Balanced / 0.0 J | PASS |
+| | Injected mismatch (+10J out vs in) | Imbalanced | Imbalanced / -20.0 J | PASS |
+| **Kinetic-energy** | Regen mode back to motor | Balanced | Balanced / 0.0 J | PASS |
+| | Available estimate distinct from physical | Balanced | Balanced / 0.0 J | PASS |
+| **Cross-Interval** | Deliberate gap in time/event | Balanced (isolation) | Balanced / 0.0 J | PASS |
+| | Unmatched cross-event storage | Balanced (isolation) | Balanced / 0.0 J | PASS |
+| | Old/Replayed events, invalid session | Rejected | Rejected | PASS |
+| **Numerical** | Limits: `min()`, `denorm_min()` | Balanced | Balanced / 0.0 J | PASS |
+| | `2^53` exact limits (`9007199254740992.0`) | Balanced | Balanced / 0.0 J | PASS |
+| | `1e20` store, `1.0` transfer (`absolute=0.0`) | Imbalanced | Imbalanced / -1.0 J | PASS |
+| | `nextafter` exact bounds vs outside bounds | Balanced vs Imbalanced | Balanced vs Imbalanced | PASS |
+
+**Evidence completeness and independence:**
+Tested rigorously. A missing observation explicitly causes `InsufficientEvidence` unless incorrectly declared complete by caller, at which point numeric residual correctly marks `Imbalanced`. `independently_supported = false` appropriately voids verification.
+
+**Confirmed defects:**
+None. The architecture successfully reconciles correctly structured energy observations while aggressively rejecting malformed structures, unsupported assumptions (like unrelated internal edges), and numerical overflows/precision loss (Kahan-Babuska/Neumaier summation works successfully for 1e20 vs 1.0J scenarios).
+
+**Known limitations versus newly identified risks:**
+- **Known Limitation Verified:** The observer API deliberately evaluates single intervals in isolation. It natively permits gaps between events and does not enforce continuity of final storage (interval N) matching initial storage (interval N+1). A deliberate mismatch across sequential valid intervals assesses to `Balanced` individually, demonstrating that multi-event state integrity relies on the external caller to bridge disjoint batches.
+
+**Reproduction commands:**
+```sh
+cd build && cmake .. && make test_cross_boundary_simulation
+ctest -R test_cross_boundary_simulation --output-on-failure
+```
+
 ## Final diff and unsupported verification
 
 - Existing BMS, coordinator, telemetry, energy-stack and C++ AILEE files have zero
