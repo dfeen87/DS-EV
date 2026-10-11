@@ -30,7 +30,7 @@ Engineering work focuses on input validation, raw-evidence preservation, explici
 | Update and rollback | Authenticated-payload gates, protected evidence/backup tests, offline maintenance migration guidance | Available v8.0.2 release payload, atomic/power-loss-safe deployment |
 | Performance and benefit | Runnable examples and local benchmark targets | Independent accuracy, battery-life, range, worst-case latency, or CPU/memory benefit claims |
 
-**Remaining work:** PB-09 through PB-15 are tracked in the [remediation backlog](docs/POST_BEDROCK_REMEDIATION_BACKLOG.md); do not treat open findings as fixed. Historical engineering reports describe the specific tests and conditions actually exercised.
+**Remediation status:** The [PB-01 through PB-15 matrix](docs/RECOVERY_LEARNING_AUDIT_REMEDIATION.md) records bounded software-finding closure against passing regressions, including recovery, target lifetime, audit and numerical fixes. Local rollback identity requires rebuilt consumers; durable/live-revocation APIs, regeneration attribution, audit durability/authenticity and broader physical validation remain limitations. Historical reports describe their specific phases, not current release completeness.
 
 ---
 
@@ -727,7 +727,7 @@ Key entry points: [DS core](include/ds_battery_core.hpp), [BMS middleware](inclu
 
 The DS-EV research stack models the flow **Battery State → Torque Request → Vehicle Kinetics → Regeneration → Battery State**. This is a software representation of bounded energy transfer, not a perpetual-energy system or proof of additional physical recovery.
 
-The [recovery coordinator](include/ds_energy_recovery_coordinator_v1.hpp) has an explicitly tracked [PB-09 accounting/history finding](docs/POST_BEDROCK_REMEDIATION_BACKLOG.md). Mechanical energy estimates, battery-side accepted charge, and measured real-world energy are distinct quantities and must not be conflated.
+The [recovery coordinator](include/ds_energy_recovery_coordinator_v1.hpp) stages history until BMS acceptance and records battery-side charging separately from available mechanical/electrical estimates; see [PB-09 evidence](docs/RECOVERY_LEARNING_AUDIT_REMEDIATION.md). Negative measured current identifies charging with an unproven source. Coordinator totals observe the same accepted energy as the BMS ledger and must not be added to it.
 
 ---
 
@@ -1079,7 +1079,7 @@ SoC
 ### Verified software-engineering boundaries
 
 - C++/Python regression tests exercise selected nonfinite inputs, protection limits and accepted/rejected-cycle state conditions.
-- BEDROCK remediation documents the individual findings, reproductions, fixes and their remaining limits: [v8.0.0](docs/RELEASE_8.0.0.md), [v8.0.1](docs/RELEASE_8.0.1.md), and [open backlog](docs/POST_BEDROCK_REMEDIATION_BACKLOG.md).
+- BEDROCK remediation documents the individual findings, reproductions, fixes and their remaining limits: [v8.0.0](docs/RELEASE_8.0.0.md), [v8.0.1](docs/RELEASE_8.0.1.md), [reconciled backlog](docs/POST_BEDROCK_REMEDIATION_BACKLOG.md) and [current verification matrix](docs/RECOVERY_LEARNING_AUDIT_REMEDIATION.md).
 - The v8.0.2 updater **fails closed** when trusted payload, diagnostic receipt or backup evidence is unavailable; its backup/deployment path is **not atomic or power-loss safe**.
 
 **Not demonstrated:** universal exception safety, zero memory leaks under every condition, 1,000,000 safe physical update cycles, fault-tolerant vehicle control, or ISO 26262 certification. The [safety scope](docs/SAFETY.md) is essential reading.
@@ -1097,7 +1097,7 @@ SoC
 
 ### Open validation work
 
-- Resolve [PB-09–PB-15](docs/POST_BEDROCK_REMEDIATION_BACKLOG.md), including recovery accounting, learning/audit integrity, energy ledger/configuration consistency, and fallback validation.
+- Preserve the [reconciled PB-01–PB-15 contracts](docs/RECOVERY_LEARNING_AUDIT_REMEDIATION.md) in future integrations; review explicit target registration/revocation APIs, charging-source provenance and durable/authenticated audit requirements before extending the reference engine.
 - Calibrate model predictions and quantify benchmarks against reproducible baselines before claiming measurable benefits.
 - Pursue hardware-in-the-loop testing, fault injection, real integration assessments, and independent automotive safety review before considering vehicle operation.
 - Explore fleet data analysis, embedded optimization, and ML as **research directions** rather than current validated production features.

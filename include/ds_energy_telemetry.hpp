@@ -31,8 +31,8 @@ struct DSEnergyTelemetry {
 
     // Power flow
     double pack_power_kw = 0.0;        // signed: +discharge / -charge
-    double regen_power_kw = 0.0;       // positive when recovering
-    double recovered_energy_kwh = 0.0;
+    double regen_power_kw = 0.0;       // legacy name: all-source accepted charging power
+    double recovered_energy_kwh = 0.0; // all-source accepted charging, regeneration unproven
 
     // DS metrics
     double ds_metric_trace = 0.0;

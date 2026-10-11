@@ -19,6 +19,8 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <atomic>
+#include <limits>
 
 namespace ailee {
 namespace ev {
@@ -54,7 +56,50 @@ struct CompartmentTelemetry {
 };
 
 /**
+ * Process-local authorization identity for one envelope target. Construction and
+ * replacement assignment obtain fresh identities, including copy/move operations.
+ * Moving also retires the source identity. A destroyed, moved or replaced
+ * envelope therefore cannot inherit old rollback grants.
+ * No allocation occurs. Exhaustion returns zero and learning fails closed.
+ */
+class ParameterTargetIdentity {
+public:
+    ParameterTargetIdentity() noexcept : value_(allocate()) {}
+    ParameterTargetIdentity(const ParameterTargetIdentity&) noexcept : value_(allocate()) {}
+    ParameterTargetIdentity(ParameterTargetIdentity&& source) noexcept : value_(allocate()) {
+        source.value_ = allocate();
+    }
+    ParameterTargetIdentity& operator=(const ParameterTargetIdentity&) noexcept {
+        value_ = allocate();
+        return *this;
+    }
+    ParameterTargetIdentity& operator=(ParameterTargetIdentity&& source) noexcept {
+        value_ = allocate();
+        if (this != &source) source.value_ = allocate();
+        return *this;
+    }
+    uint64_t value() const noexcept { return value_; }
+
+private:
+    static uint64_t allocate() noexcept {
+        uint64_t candidate = next_.load(std::memory_order_relaxed);
+        while (candidate != std::numeric_limits<uint64_t>::max()) {
+            if (next_.compare_exchange_weak(candidate, candidate + 1,
+                                           std::memory_order_relaxed)) return candidate;
+        }
+        return 0;
+    }
+    inline static std::atomic<uint64_t> next_{1};
+    uint64_t value_;
+};
+
+/**
  * Parameter Envelope definition for bounding continuous learning updates.
+ * Keep one live envelope per logical target and serialize caller access. Its
+ * param_name must remain a valid C string during calls. Whole-envelope copy/move
+ * construction or assignment invalidates prior rollback identity; changing
+ * ordinary scalar limits does not. The additive identity changes struct layout,
+ * but preserves default and six-field aggregate initialization in C++17.
  */
 struct ParameterEnvelope {
     const char* param_name = "";
@@ -63,6 +108,7 @@ struct ParameterEnvelope {
     double max_step_delta = 0.05; // Maximum allowed change per update cycle
     double current_value = 0.5;
     double default_value = 0.5;
+    ParameterTargetIdentity target_identity{};
 };
 
 /**

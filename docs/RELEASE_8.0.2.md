@@ -293,3 +293,31 @@ from available mechanical estimates. Existing optional telemetry binding,
 adapter exception-contract and Kalman modeling limitations are reported there.
 The updater, rollback, production configuration, historical v8.0.0/v8.0.1 records
 and release version numbers are unchanged by this phase.
+
+## Subsequent recovery, learning, rollback and audit phase
+
+This phase starts from merged main
+`a1bc500de5c3ebd32fb72983bede50dc42ee04d6` after numerical/middleware/fallback
+remediation. It repairs PB-11, PB-10 and PB-12 in dependency order and PB-09 under
+the accepted raw-energy contract. The preceding reports retain their historical
+scope and measurements. No release/tag, deployment, parameter distribution or
+hardware operation is added.
+
+The [current engineering evidence and PB-01 through PB-15 matrix](RECOVERY_LEARNING_AUDIT_REMEDIATION.md)
+independently replay original failures and map every finding to current passing
+regressions. It reconciles already-implemented PB-06/PB-08 guards and documents
+their directional-advisory and external-clock limits. TrustGate remains
+`noexcept`, validates configurable policy and all score entry points, and denies
+invalid configuration. Rollback binds explicit local target lifetimes and current
+envelopes; its additive identity changes layout/ABI and requires consumer rebuild.
+Denied operations remain separate audit evidence, and serialized rejected NaN/Inf
+values and hostile strings remain machine-readable. Coordinator accepted
+all-source battery charging and available mechanical/electrical estimates are
+separate observations; measured negative current does not establish regeneration.
+
+Bounded software-finding closure is not a claim of complete vehicle validation or
+published v8.0.2 release readiness. Durable/distributed target registration, live
+rollback revocation, audit write durability/authenticity, charging-source evidence,
+upstream AILEE compatibility and physical validation remain explicit limitations.
+Full build/test/sanitizer/CI outcomes and the fresh complete-diff review are in the
+current phase report; version numbers and historical reports remain unchanged.

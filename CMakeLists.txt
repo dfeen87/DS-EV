@@ -243,6 +243,26 @@ if(DS_BUILD_TESTS)
     target_link_libraries(test_ailee_trust_integration PRIVATE ds_ailee_governor)
     add_test(NAME test_ailee_trust_integration COMMAND test_ailee_trust_integration)
     ds_enable_test_assertions(test_ailee_trust_integration)
+
+    add_executable(test_trust_learning_integrity tests/test_trust_learning_integrity.cpp)
+    target_link_libraries(test_trust_learning_integrity PRIVATE ds_battery)
+    add_test(NAME test_trust_learning_integrity COMMAND test_trust_learning_integrity)
+    ds_enable_test_assertions(test_trust_learning_integrity)
+
+    add_executable(test_learning_allocation_atomicity tests/test_learning_allocation_atomicity.cpp)
+    target_link_libraries(test_learning_allocation_atomicity PRIVATE ds_battery)
+    add_test(NAME test_learning_allocation_atomicity COMMAND test_learning_allocation_atomicity)
+    ds_enable_test_assertions(test_learning_allocation_atomicity)
+
+    add_executable(test_recovery_integrity tests/test_recovery_integrity.cpp)
+    target_link_libraries(test_recovery_integrity PRIVATE ds_battery)
+    add_test(NAME test_recovery_integrity COMMAND test_recovery_integrity)
+    ds_enable_test_assertions(test_recovery_integrity)
+
+    add_executable(test_remediation_reconciliation tests/test_remediation_reconciliation.cpp)
+    target_link_libraries(test_remediation_reconciliation PRIVATE ds_battery)
+    add_test(NAME test_remediation_reconciliation COMMAND test_remediation_reconciliation)
+    ds_enable_test_assertions(test_remediation_reconciliation)
 endif()
 
 # ============================================================================

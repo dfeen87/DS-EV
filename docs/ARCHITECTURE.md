@@ -105,3 +105,17 @@ Modular, robust diagnostics tools used during installation, updates, or maintena
 * **`install_policy.json`**: System-level installation rules and dependencies.
 * **`vehicle_status.json`**: Mock state representing current simulated telemetries.
 * **`update_source.json`**: Update source fallback URL and policy definitions.
+
+## Recovery accounting implementation contract
+
+The cycle diagram above describes architectural intent. Current software
+acceptance is documented in
+[RECOVERY_LEARNING_AUDIT_REMEDIATION.md](RECOVERY_LEARNING_AUDIT_REMEDIATION.md)
+and the [accepted raw electrical-energy contract](NUMERICAL_MIDDLEWARE_FALLBACK_REMEDIATION.md).
+The recovery coordinator stages its own history until a BMS cycle succeeds.
+Accepted battery-side charging is calculated from the actual raw voltage,
+chosen current after coordinator limits/smoothing, and interval in seconds.
+Mechanical and electrical recovery estimates are separate diagnostics and are
+never added as extra energy to the BMS ledger. Measured negative current
+identifies charging; it does not identify its source as regeneration. Estimated
+mode is a simulation estimate, without physical regeneration attribution.

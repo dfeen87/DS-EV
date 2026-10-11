@@ -18,7 +18,13 @@ requirements for subsequent work, not reported passing tests.
 The numerical/middleware/fallback phase resolves PB-13 through PB-15, with
 regression-first measurements, accounting/configuration contracts and software
 verification in [NUMERICAL_MIDDLEWARE_FALLBACK_REMEDIATION.md](NUMERICAL_MIDDLEWARE_FALLBACK_REMEDIATION.md).
-PB-09 through PB-12 remain open; v8.0.2 is still a consolidated development target.
+The recovery/learning/audit phase resolves PB-11, PB-10 and PB-12 in that order,
+plus PB-09 under PB-13's accepted-energy contract. It independently verifies and
+reconciles PB-06/PB-08 and the full PB-01 through PB-15 matrix. See
+[RECOVERY_LEARNING_AUDIT_REMEDIATION.md](RECOVERY_LEARNING_AUDIT_REMEDIATION.md)
+for current passing regressions, explicit target/ABI and energy-attribution limits,
+audit schema changes, and complete validation. v8.0.2 remains a development target;
+bounded software-finding closure is not a release or vehicle-validation claim.
 
 Severity describes the software boundary and potential consequence. Physical
 consequences have not been verified. Reproductions use synthetic in-process values
@@ -99,7 +105,7 @@ compatible where possible. Add failing regressions before each correction.
 - **Scope:** Zero RPM retains the prior optional-speed contract: supplied angular frequency is zero, torque remains bounded by other ceilings, and no division occurs. Positive-speed power enforcement requires actual RPM from the caller; this software does not prove rotor speed or electrical recovery efficiency. No replacement voltage-policy field or external freshness guarantee is invented.
 - **Independent corrective iteration:** RPM `7e-320`, power ceiling `2*denorm_min` (`9.88131e-324 kW`), and warmed filters emitted about `2 Nm` / `1.48220e-323 kW`; RPM `1e-320` also lost the conversion entirely. Zero or subnormal power-conversion factors for positive RPM now deny with finite zero authority without advancing accepted history. The new regression failed 10 checks before this correction and passes afterward; the independent reviewer verified both cases.
 
-## PB-06 — Configured lower-temperature and SOC limits are unused
+## PB-06 — Configured lower-temperature and SOC limits are unused — resolved, reconciled
 
 - **Severity / confidence:** High; confirmed configuration gap; directional policy requires clarification in implementation.
 - **File / function:** `include/ds_bms_middleware_v2.hpp`, `ds_plugin::SafetyMonitor::check` and `SafetyLimits`.
@@ -108,6 +114,7 @@ compatible where possible. Add failing regressions before each correction.
 - **Minimal correction:** Establish the intended charge/discharge meaning of these existing fields, then enforce the applicable conditions on raw evidence with explicit diagnostics; document any intentionally advisory field.
 - **Required regressions:** Configured and default lower-temperature/SOC boundaries, current direction, zero current, and exact equality; verify applicable restrictions without changing normal behavior.
 - **Dependencies:** Build on raw fault preservation; review consumers of `safety_fault` so advisory recommendations are not misrepresented as actuator shutdown.
+- **Current reconciliation / evidence:** Existing guards from `370ce23` and advisory refinement `678c593` enforce directional SOC and active/rest temperature policy. Low SOC faults on discharge, high SOC faults on charge; corrective direction/rest advises. Cold active current faults in either direction; cold rest advises. Exact equality passes. Existing middleware regressions and 849-check independent PB-06/PB-08 reconciliation cover default/custom nextafter/equal boundaries, signed zero, exact reasons and recovery. The original at-rest stimuli intentionally remain without hard faults but now have explicit warnings/advisories. This closes missing configured monitoring, not actuator authorization.
 
 ## PB-07 — BMS adapter authorizes missing or rejected-cycle evidence — resolved at adapter boundary
 
@@ -121,7 +128,7 @@ compatible where possible. Add failing regressions before each correction.
 - **8.0.1 correction / evidence:** A private availability flag starts false, clears on initialization/reset and before every attempted update, and becomes true only after `enhance_cycle` returns. Unavailable evaluation and the recommendation getter return Level 3; telemetry has health/trust `0`, anomaly true, and an explicit missing-successful-update reason. Middleware exceptions propagate and its last good model remains intact. `test_bms_adapter_evidence` has 42 failing checks against reviewed head `b0558bc`, then passes after correction, including missing evidence, rejected latest cycle, finite-overflow rejection, recovery, reset, and TrustGate learning denial.
 - **Scope:** Availability proves only successful completion of the latest adapter-observed middleware call. Repeated evaluation is allowed until the next update attempt; no timestamp or external sensor-freshness claim is made. The subsequent PB-03 state-integrity phase rejects sub-minimum cycles before mutation; this availability flag then denies their current-cycle evidence.
 
-## PB-08 — Hardware adapter treats future and NaN clock evidence as fresh
+## PB-08 — Hardware adapter treats future and NaN clock evidence as fresh — resolved, reconciled
 
 - **Severity / confidence:** High; confirmed with a fake transport only.
 - **File / functions:** `src/ds_bms_hardware_adapter.hpp`, `ds_plugin::DSHardwareAdapter::set_now_seconds` and `get_fresh_or_throw`.
@@ -130,8 +137,9 @@ compatible where possible. Add failing regressions before each correction.
 - **Minimal correction:** Validate clock and age values and a finite nonnegative configured maximum age; reject future/malformed cache timing before returning the signal.
 - **Required regressions:** Future timestamp, backward clock, NaN/infinite clocks and ages, exact maximum-age equality, ordinary fresh and expired signals.
 - **Dependencies:** Independent software correction; physical clock synchronization, CAN authenticity, and real hardware behavior remain outside this reproduction.
+- **Current reconciliation / evidence:** Existing hardware guards reject malformed age configuration, clocks/timestamps and nonfinite/negative/expired calculated ages; exact maximum-age equality remains accepted. The original future/NaN-clock reads now throw. Existing hardware regressions and independent all-four-getter checks cover fresh/missing/expired/future, NaN/Inf timestamps, finite subtraction overflow and recache; fake transport sends remain zero. A backward clock move retaining a positive fresh age is intentionally undetected: an external monotonic-clock source remains required.
 
-## PB-09 — Recovery coordinator mutates rejected history and overcounts recovery
+## PB-09 — Recovery coordinator mutates rejected history and overcounts recovery — resolved under accepted-energy contract
 
 - **Severity / confidence:** Medium; confirmed.
 - **File / functions:** `include/ds_energy_recovery_coordinator_v1.hpp`, `ds::drive::DSEnergyRecoveryCoordinator::step` and `smooth_current`.
@@ -140,8 +148,9 @@ compatible where possible. Add failing regressions before each correction.
 - **Minimal correction:** Validate before mutation and stage coordinator history/diagnostics until BMS success. Account battery-side recovery from the accepted current/voltage; expose estimated available mechanical energy separately if needed.
 - **Required regressions:** Rejected-cycle state equivalence to a fresh/unchanged coordinator; measured/estimated modes, smoothing and current caps, unit/sign consistency, and no double counting.
 - **Dependencies:** Keep BMS accepted-state accounting consistent with PB-13; estimates remain software quantities, not measured pack recovery.
+- **Correction / evidence:** Config/input domains and complete candidate calculations/allocations precede BMS acceptance. Smoothing and diagnostics commit only after success; preallocated bounded diagnostics avoid post-acceptance allocation. Accepted raw voltage/current after caps/smoothing determines battery-side charging kWh exactly once. Legacy recovered-energy fields alias explicit all-source accepted-charging fields; mechanical/electrical available estimates remain separate and never add to BMS energy. Measured negative current is `UNATTRIBUTED_MEASURED`; estimated mode is `SIMULATED_REGEN_ESTIMATE`, neither establishes physical regeneration. `test_recovery_integrity` covers originals, modes/caps/smoothing/units, failed recovery, finite/nonfinite and cumulative overflow, all BMS modes/Kalman and allocation injection. See the phase report for counts and compatibility changes.
 
-## PB-10 — Learning rollback crosses targets and restores invalid baselines
+## PB-10 — Learning rollback crosses targets and restores invalid baselines — resolved under local target/lifetime contract
 
 - **Severity / confidence:** High; confirmed reference-engine defect; no production control-loop call sites found.
 - **File / functions:** `include/ailee_trust_layer/learning_engine.hpp`, `ailee::ev::LearningEngine::propose_parameter_update` and `rollback`; `include/ailee_trust_layer/ailee_trust_gate.hpp`, `TrustGate::verify_parameter_update`.
@@ -150,8 +159,9 @@ compatible where possible. Add failing regressions before each correction.
 - **Minimal correction:** Validate the entire current envelope before proposals; bind snapshots to their target and validate restoration against the current envelope before mutation. The rollback API has no compartment argument: matching names alone cannot distinguish equal-named parameters in different compartments. Choose an explicit compatible target-binding/lifetime contract before connecting it to control loops.
 - **Required regressions:** Foreign target, same name/different target, tightened envelope, malformed envelope, invalid prior value, rejected handle, ordinary rollback and rollback history; failure leaves target/history unchanged.
 - **Dependencies:** PB-11 score/policy validation; preserve rollback aliases and public interface compatibility where feasible.
+- **Correction / evidence:** Current numeric state must be valid before a proposal. Accepted grants bind exact address plus non-forgeable envelope lifetime token, compartment and name; names alone establish no identity. Construction/replacement/copy/move and recycled addresses cannot inherit grants; process-local non-reused handles prevent stale/foreign-engine collisions. Same identity cannot be reused for another compartment/name; restoration validates current envelope and baseline bounds before mutation. Denials retain separate audit evidence and never enter committed snapshots/history. Existing signatures and six-value aggregate construction remain; the additive nontrivial identity changes layout/ABI and raw-copy assumptions, requiring rebuild. Public scalar reuse, ownership, module/process limits and the required durable/live-revocation API redesign are explicitly documented in the phase report.
 
-## PB-11 — Invalid trust configuration and out-of-domain scores authorize learning
+## PB-11 — Invalid trust configuration and out-of-domain scores authorize learning — resolved
 
 - **Severity / confidence:** High; confirmed reference trust-gate defect; current call sites are integration tests.
 - **File / functions:** `include/ailee_trust_layer/ailee_trust_gate.hpp`, `ailee::ev::TrustGate` constructor, `evaluate_telemetry`, `verify_parameter_update`, and `verify_protective_mode_exit`.
@@ -160,8 +170,9 @@ compatible where possible. Add failing regressions before each correction.
 - **Minimal correction:** Validate finite, ordered thresholds within `[0,1]`; invalid configuration must fail closed. Enforce the same score domain on learning and recovery while retaining valid configurable thresholds and recovery policies.
 - **Required regressions:** NaN/infinite/out-of-range/unordered thresholds; scores below zero/above one/nonfinite at every gate; valid nondefault policy and exact threshold equality.
 - **Dependencies:** Implement with or before PB-10; do not replace a valid configured threshold with a hardcoded default.
+- **Correction / evidence:** Finite `[0,1]` thresholds with `hard <= soft <= accept` are checked without throwing. Invalid policy denies telemetry/learning/protective exit; all score entry points apply finite `[0,1]` validation. Configurable thresholds/recovery cycles, inclusive equality, equal thresholds and existing step tolerance remain. `test_trust_learning_integrity` verifies invalid policies/scores at every gate, nondefault exact/adjacent boundaries and compile-time `noexcept` contracts. The initial policy regression failed 64 of 103 checks before correction.
 
-## PB-12 — Learning audit records wrong prior state and invalid JSON
+## PB-12 — Learning audit records wrong prior state and invalid JSON — resolved at history/serialization boundary
 
 - **Severity / confidence:** Medium; confirmed.
 - **File / functions:** `include/ailee_trust_layer/learning_engine.hpp`, `ailee::ev::LearningEngine::rollback` and `write_audit_log`.
@@ -170,6 +181,7 @@ compatible where possible. Add failing regressions before each correction.
 - **Minimal correction:** Snapshot the actual target value before rollback; serialize escaped strings and explicit JSON representations for nonfinite rejected inputs, preserving rejection information and a valid audit schema.
 - **Required regressions:** Older-handle rollback after later updates; parse every emitted line; quotes, backslashes, control characters, NaN/infinity rejection, and alias consistency.
 - **Dependencies:** PB-10 target validation; document any serialization-schema additions. Cryptographic audit authentication is a separate limitation, not established by these tests.
+- **Correction / evidence:** Rollback captures the actual pre-restoration current value (`0.58`, not original applied `0.54`). JSON uses escaped strings, locale-independent round-trip finite values, and `null` plus `nonfinite_evidence` classifications for NaN/Inf. Additive operation/audit/target/source metadata separates denials from accepted transitions; `get_snapshots()` is committed history, `get_audit_records()` retains all attempts. Serialization/output/history allocations precede target mutation. C++ snapshot/alias/history checks and `test_learning_audit.py` strictly parse hostile records. File writes remain best effort; audit durability/authenticity and sink synchronization are not established.
 
 ## PB-13 — Raw-current energy ledger can overflow while model stability passes — resolved
 
