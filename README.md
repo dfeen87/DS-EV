@@ -5,7 +5,7 @@
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://isocpp.org/)
 [![Status: HIL Validation Required](https://img.shields.io/badge/Status-HIL%20Validation%20Required-orange.svg)](docs/SAFETY.md)
 [![Stage: Software Validation](https://img.shields.io/badge/Stage-Software%20Validation-blue.svg)](docs/POST_BEDROCK_REMEDIATION_BACKLOG.md)
-[![Candidate: 9.0.0](https://img.shields.io/badge/Candidate-9.0.0-blue.svg)](docs/RELEASE_9.0.0.md)
+[![Release: v9.0.0](https://img.shields.io/badge/Release-v9.0.0-blue.svg)](https://github.com/dfeen87/DS-EV/releases/tag/v9.0.0)
 [![CI](https://github.com/dfeen87/DS-EV/actions/workflows/ci.yml/badge.svg)](https://github.com/dfeen87/DS-EV/actions/workflows/ci.yml)
 
 ## Research-Stage EV Battery Management & Control Architecture
@@ -16,9 +16,11 @@ Engineering work focuses on input validation, raw-evidence preservation, explici
 
 > **Vehicle safety notice:** DS-EV is **not vehicle-validated, road-ready, or automotive safety-certified**. Do not connect its examples, scripts, or computed commands to a live vehicle, traction inverter, charger, brake system, or battery actuators. Use software simulation and non-actuating research environments only. Any eventual vehicle application needs independent system hazard analysis, hardware-in-the-loop (HIL) and fault-injection validation, real hardware integration testing, applicable functional-safety assessment, and qualified engineering oversight. HIL alone does not confer certification.
 
-**Version status:** `9.0.0 — BEDROCK REFORGED: ENERGY CONTINUITY` is the current **development release candidate**, prepared in a draft PR. It is not a published release. The latest published release is [v8.0.1](https://github.com/dfeen87/DS-EV/releases/tag/v8.0.1); the [v8.0.2 report](docs/RELEASE_8.0.2.md) preserves intervening development evidence. A version string or passing CI does not establish a deployable vehicle release.
+**Version status:** [v9.0.0 — BEDROCK REFORGED: ENERGY CONTINUITY](https://github.com/dfeen87/DS-EV/releases/tag/v9.0.0) was **published October 11, 2026** as research-stage software. The [v8.0.2 development report](docs/RELEASE_8.0.2.md) preserves intervening work; v9 engineering reports document pre-publication verification snapshots. Publication and passing CI do not establish vehicle readiness or an authenticated updater payload.
 
-**Start with:** [v9.0.0 release note](docs/RELEASE_9.0.0.md) · [Fresh simulation and validation report](docs/SIMULATION_VALIDATION_9.0.0.md) · [Earlier independent audit](docs/RELEASE_READINESS_AUDIT_9.0.0.md) · [Post-BEDROCK backlog](docs/POST_BEDROCK_REMEDIATION_BACKLOG.md) · [Safety scope](docs/SAFETY.md) · [Simulation quick start](#-simulation-only-quick-start) · [Citation](CITATION.cff)
+**v9.0.0 engineering footprint since v8.0.1:** 40 commits, 63 changed files, **13,300 additions + 1,341 deletions = 14,641 lines changed**. The campaign addressed fifteen scoped BEDROCK findings and added opt-in Energy Continuity.
+
+**Start with:** [Published v9.0.0 release](https://github.com/dfeen87/DS-EV/releases/tag/v9.0.0) · [V9 engineering report](docs/RELEASE_9.0.0.md) · [Simulation and validation report](docs/SIMULATION_VALIDATION_9.0.0.md) · [Earlier independent audit](docs/RELEASE_READINESS_AUDIT_9.0.0.md) · [Post-BEDROCK backlog](docs/POST_BEDROCK_REMEDIATION_BACKLOG.md) · [Safety scope](docs/SAFETY.md) · [Simulation quick start](#-simulation-only-quick-start) · [Citation](CITATION.cff)
 
 ## Evidence & Release Status
 
@@ -28,12 +30,12 @@ Engineering work focuses on input validation, raw-evidence preservation, explici
 | Automotive AILEE/governance | C++/Python reference paths, targeted adversarial regression tests, configurable protection rules | Certification for drivetrain, brake, or charge actuation |
 | Energy Continuity | Optional directed physical-transfer records, checked joule accounting, explicit-boundary reconciliation, deterministic simulated scenarios | Sensor authenticity, complete physical observations, experimentally measured losses or regenerative recovery |
 | Python fallback/extension | Python unit tests; separate CI build and smoke test for optional pybind11 extension | Numerical equivalence of the approximate fallback to C++ |
-| Update and rollback | Authenticated-payload gates, protected evidence/backup tests, historically pinned offline maintenance migration guidance | Available v9.0.0 release payload, atomic/power-loss-safe deployment |
+| Update and rollback | Authenticated-payload gates, protected evidence/backup tests, historically pinned offline maintenance migration guidance | A separately authenticated, digest-pinned v9.0.0 updater payload; atomic/power-loss-safe deployment |
 | Performance and benefit | Runnable examples and local benchmark targets | Independent accuracy, battery-life, range, worst-case latency, or CPU/memory benefit claims |
 
 **Remediation status:** The [PB-01 through PB-15 matrix](docs/RECOVERY_LEARNING_AUDIT_REMEDIATION.md) records bounded software-finding closure against passing regressions, including recovery, target lifetime, audit and numerical fixes. Local rollback identity requires rebuilt consumers; durable/live-revocation APIs, regeneration attribution, audit durability/authenticity and broader physical validation remain limitations. Historical reports describe their specific phases, not current release completeness.
 
-The earlier independent audit reviewed `038653cd6600318e36276001099960dc8c523c3a`. Its release-preparation verdict does not assess the continuity code added afterward; the [fresh candidate report](docs/SIMULATION_VALIDATION_9.0.0.md) records that feature's execution and final-diff review.
+The earlier independent audit reviewed `038653cd6600318e36276001099960dc8c523c3a`. Its release-preparation verdict does not assess the continuity code added afterward; the [v9 simulation report](docs/SIMULATION_VALIDATION_9.0.0.md) records subsequent feature tests and final-diff review, including [independent cross-boundary validation](https://github.com/dfeen87/DS-EV/pull/53).
 
 ---
 
@@ -44,6 +46,7 @@ The earlier independent audit reviewed `038653cd6600318e36276001099960dc8c523c3a
 - [Why This Matters](#-why-this-matters)
 - [Key Features](#-key-features)
 - [Energy Continuity](#energy-continuity)
+  - [V9 Simulation Highlights](#v9-simulation-highlights)
 - [Performance & Validation Evidence](#performance--validation-evidence)
 - [Advanced Features & Examples](#-advanced-features--examples)
 - [DS Torque Enhancement Module](#ds-torque-enhancement-module-v20)
@@ -139,6 +142,18 @@ flowchart LR
   G -.->|evidence eligibility only| EC
 ```
 
+### V9 Simulation Highlights
+
+The following are **synthetic, deterministic software results**, not physical vehicle measurements:
+
+- Four discharge/braking intervals each reconciled with a **0 J residual**, alongside **8,000 J of explicitly modeled thermal dissipation**.
+- Accepted battery charging totaled **12,000 J** across the two braking intervals, counted once despite the recovery coordinator's accounting alias.
+- Independent component-boundary tests surfaced **+5 J** of unexplained inverter input and **−20 J** of motor imbalance when evidence was declared complete.
+- Compensated summation exposed a **1 J** discrepancy beside a **10²⁰ J** energy inventory under zero tolerance.
+- The v9 follow-up passed **23/23 hosted CTest tests**, including the dedicated cross-boundary simulation suite.
+
+Each result depends on the modeled boundary and supplied evidence. The ledger reconciles individual intervals; **it does not enforce matching storage endpoints across successive events**. Review the [simulation evidence](docs/SIMULATION_VALIDATION_9.0.0.md) and [independent tests in PR #53](https://github.com/dfeen87/DS-EV/pull/53) for analytic oracles, reproduction commands, and limitations.
+
 Transactions stage validated records before commit, reject malformed/nonfinite/overflowing evidence and duplicate identities, and have bounded session/reset behavior. Declared incomplete storage or transfer evidence produces **insufficient evidence**; claiming complete storage while omitting a selected node rejects as malformed. An unexplained residual is never assigned to heat, and a zero residual from dependent estimates is not independent physical validation. Core informational energies such as `energy_phi` or `energy_metric` are not physical transfer measurements.
 
 The passive adapter captures a checkpoint before the caller's existing BMS cycle and observes exactly one accepted cycle afterward. A BMS reinitialization requires a newer continuity session and a fresh checkpoint. Reconciliation balances the supplied per-event storage endpoints; it does not certify continuous physical history across events or unobserved intervals.
@@ -147,9 +162,9 @@ Run the fixed-input software example:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DDS_ENABLE_PYTHON_GOVERNOR=OFF
-cmake --build build --target energy_continuity_simulation test_energy_continuity
+cmake --build build --target energy_continuity_simulation test_energy_continuity test_cross_boundary_simulation
 ./build/energy_continuity_simulation
-ctest --test-dir build -R energy_continuity --output-on-failure
+ctest --test-dir build -R 'energy_continuity|cross_boundary_simulation' --output-on-failure
 ```
 
 The [release note](docs/RELEASE_9.0.0.md) describes the ownership and migration contracts. The [validation report](docs/SIMULATION_VALIDATION_9.0.0.md) records actual simulated values, analytic expectations, residuals, executed checks and limitations. No output is presented as a hardware measurement or safe actuator instruction.
@@ -1034,7 +1049,7 @@ cmake --build build
 ./build/basic_integration
 ```
 
-The [v9.0.0 simulation and validation report](docs/SIMULATION_VALIDATION_9.0.0.md) records fresh reproducible numerical scenarios and candidate verification. The [v8.0.0 simulation observations](docs/simulation_observations.md) remain historical qualitative context; earlier [BEDROCK release reports](docs/RELEASE_8.0.1.md) retain their original regression scope.
+The [v9.0.0 simulation and validation report](docs/SIMULATION_VALIDATION_9.0.0.md) records reproducible numerical scenarios and pre-publication verification; [PR #53](https://github.com/dfeen87/DS-EV/pull/53) supplies additional independent C++ cross-boundary coverage. The [v8.0.0 simulation observations](docs/simulation_observations.md) remain historical qualitative context; earlier [BEDROCK release reports](docs/RELEASE_8.0.1.md) retain their original regression scope.
 
 ### C++ and Python regression tests
 
@@ -1154,7 +1169,7 @@ SoC
 - **v8.0.0 BEDROCK:** Invariant review and trust-boundary integration; [engineering report](docs/RELEASE_8.0.0.md).
 - **v8.0.1 (published):** Middleware safety evidence and protective torque fixes; [release report](docs/RELEASE_8.0.1.md).
 - **v8.0.2 (development):** Fail-closed updater and backup controls, manual legacy migration validation, and further numerical/integrity remediation; [development report](docs/RELEASE_8.0.2.md).
-- **v9.0.0 BEDROCK REFORGED: ENERGY CONTINUITY (candidate):** Consolidated major-version alignment, preserved PB-01–PB-15 contracts, opt-in physical accounting and fresh deterministic simulation/validation; [release note](docs/RELEASE_9.0.0.md). No release is published by preparation.
+- **v9.0.0 BEDROCK REFORGED: ENERGY CONTINUITY (published):** Consolidated major-version alignment, PB-01–PB-15 scoped remediation, opt-in physical accounting and independent deterministic simulation validation; [published release](https://github.com/dfeen87/DS-EV/releases/tag/v9.0.0) · [engineering report](docs/RELEASE_9.0.0.md).
 
 ### Open validation work
 
@@ -1179,6 +1194,26 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 ## 🙏 Acknowledgments
 
-We would like to acknowledge the engineers and developers who contributed to the formulation and testing of the Dual-State battery models.
+DS-EV is an independent research and software engineering project conceived, developed, and maintained by **Don Michael Feeney Jr.**
 
-I would like to acknowledge **Google Jules**, **Microsoft Copilot**, **Anthropic Claude**, and **OpenAI ChatGPT and Codex** for their meaningful assistance in refining concepts, improving clarity, and strengthening the overall quality of this work.
+The project's original concepts, research direction, architectural vision, and engineering decisions originate with its author. AI-assisted tools have provided valuable support throughout development, testing, technical review, and documentation, while project ownership, integration decisions, and release responsibility remain with the author.
+
+Special acknowledgment goes to:
+
+- **OpenAI ChatGPT (Lex):** Ongoing technical discussions, architectural reasoning, engineering planning, analytical review, documentation, and research communication.
+
+- **OpenAI Codex:** AI-assisted software implementation, debugging, numerical hardening, regression testing, and engineering refinement across multiple development phases.
+
+- **Google Jules:** Focused code remediation, regression development, independent simulation validation, and documentation improvements.
+
+- **Anthropic Claude:** Occasional assistance with Markdown documentation, formatting, and technical writing refinements.
+
+- **Microsoft Copilot:** An early-stage sounding board for discussing ideas, exploring possibilities, and providing conversational feedback during the project's initial development.
+
+These contributions reflect the use of AI as an engineering support tool—not a substitute for independent research, human judgment, or accountability.
+
+I also extend my appreciation to everyone who has explored, studied, cloned, tested, or otherwise taken an interest in DS-EV.
+
+Thank you for being part of this continuing journey.
+
+*Preserve the mathematics. Govern the evidence. Reconcile the energy.*
