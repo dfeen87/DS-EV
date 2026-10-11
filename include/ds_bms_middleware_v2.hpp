@@ -443,6 +443,13 @@ public:
         }
     }
 
+    // Bound for preallocating a complete diagnostics result before an accepted
+    // cycle. weak_cell_ids contains at most one ID per owned cell. Requires the
+    // same exclusive-access contract as enhance_cycle (no concurrent reinit).
+    std::size_t diagnostic_cell_capacity() const noexcept {
+        return pack_ ? pack_->get_cells().size() : 1u;
+    }
+
     const DiagnosticReport& diagnostics() const { return diag_; }
     const DiagnosticReport* diagnostics_ptr() const { return &diag_; }
     DiagnosticReport get_diagnostics() const { return diag_; }

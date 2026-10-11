@@ -44,20 +44,26 @@ struct GovernanceDecision {
 class TrustGate {
 public:
     explicit TrustGate(const TrustGateConfig& config = TrustGateConfig()) noexcept
-        : config_(config) {}
+        : config_(config), valid_config_(valid_score(config.accept_trust_threshold) &&
+              valid_score(config.soft_ceiling_threshold) &&
+              valid_score(config.hard_ceiling_threshold) &&
+              config.hard_ceiling_threshold <= config.soft_ceiling_threshold &&
+              config.soft_ceiling_threshold <= config.accept_trust_threshold) {}
 
     /**
      * Evaluate system governance decision given a set of compartment telemetry snapshots.
      */
     GovernanceDecision evaluate_telemetry(const CompartmentTelemetry* telemetries, std::size_t count) const noexcept {
         GovernanceDecision decision;
-        if (count == 0 || telemetries == nullptr) {
+        if (!valid_config_ || count == 0 || telemetries == nullptr) {
             decision.level = GovernanceLevel::LEVEL_3_PROTECTIVE;
             decision.overall_trust_score = 0.0;
             decision.derate_factor = 0.25;
             decision.learning_allowed = false;
             decision.fallback_active = true;
-            snprintf(decision.reason.data, sizeof(decision.reason.data), "No telemetry inputs available; fallback activated.");
+            snprintf(decision.reason.data, sizeof(decision.reason.data), "%s",
+                !valid_config_ ? "Invalid TrustGate configuration; fallback activated." :
+                                 "No telemetry inputs available; fallback activated.");
             return decision;
         }
 
@@ -69,9 +75,8 @@ public:
             const auto& t = telemetries[i];
             const int level = static_cast<int>(t.recommended_level);
             if (!std::isfinite(t.timestamp) || !std::isfinite(t.health_score) ||
-                !std::isfinite(t.trust_score) || !std::isfinite(t.stress_metric) ||
+                !valid_score(t.trust_score) || !std::isfinite(t.stress_metric) ||
                 t.health_score < 0.0 || t.health_score > 1.0 ||
-                t.trust_score < 0.0 || t.trust_score > 1.0 ||
                 level < static_cast<int>(GovernanceLevel::LEVEL_0_NORMAL) ||
                 level > static_cast<int>(GovernanceLevel::LEVEL_3_PROTECTIVE)) {
                 decision.level = GovernanceLevel::LEVEL_3_PROTECTIVE;
@@ -132,12 +137,13 @@ public:
 
     /**
      * Checks whether system state satisfies deterministic entry/exit criteria for exiting Level 3 Protective Mode.
-     * Requires sustained trust_score >= 0.85, zero active anomalies, and consecutive healthy cycles >= hysteresis threshold.
+     * Requires sustained trust_score >= the configured accept threshold, zero
+     * active anomalies, and consecutive healthy cycles >= the configured count.
      */
     bool verify_protective_mode_exit(double current_trust_score,
                                      bool active_anomaly,
                                      uint32_t consecutive_healthy_cycles) const noexcept {
-        if (!std::isfinite(current_trust_score) || active_anomaly) return false;
+        if (!valid_config_ || !valid_score(current_trust_score) || active_anomaly) return false;
         if (current_trust_score < config_.accept_trust_threshold) return false;
         if (consecutive_healthy_cycles < config_.protective_recovery_cycles) return false;
         return true;
@@ -145,15 +151,14 @@ public:
 
     /**
      * Checks if a proposed parameter update passes trust gating and envelope limits.
-     * Enforces strict trust_score >= 0.85 requirement.
+     * Enforces the configured accept threshold (default 0.85), without clamping
+     * invalid scores into an authorized domain.
      */
     bool verify_parameter_update(double current_trust_score,
                                  const ParameterEnvelope& envelope,
                                  double proposed_value) const noexcept {
-        if (!std::isfinite(current_trust_score) || !std::isfinite(proposed_value) ||
-            !std::isfinite(envelope.min_value) || !std::isfinite(envelope.max_value) ||
-            !std::isfinite(envelope.current_value) || !std::isfinite(envelope.max_step_delta) ||
-            envelope.min_value > envelope.max_value || envelope.max_step_delta < 0.0 ||
+        if (!valid_config_ || !valid_score(current_trust_score) ||
+            !std::isfinite(proposed_value) || !is_valid_parameter_state(envelope) ||
             current_trust_score < config_.accept_trust_threshold) {
             return false;
         }
@@ -161,14 +166,29 @@ public:
             return false;
         }
         double step = std::abs(proposed_value - envelope.current_value);
-        if (step > envelope.max_step_delta + 1e-9) {
+        if (!std::isfinite(step) || step > envelope.max_step_delta + 1e-9) {
             return false;
         }
         return true;
     }
 
+    /** Validate the current numeric envelope independently of learning policy. */
+    static bool is_valid_parameter_state(const ParameterEnvelope& envelope) noexcept {
+        return std::isfinite(envelope.min_value) && std::isfinite(envelope.max_value) &&
+            std::isfinite(envelope.current_value) && std::isfinite(envelope.max_step_delta) &&
+            std::isfinite(envelope.default_value) &&
+            envelope.min_value <= envelope.max_value && envelope.max_step_delta >= 0.0 &&
+            envelope.current_value >= envelope.min_value &&
+            envelope.current_value <= envelope.max_value;
+    }
+
 private:
+    static bool valid_score(double score) noexcept {
+        return std::isfinite(score) && score >= 0.0 && score <= 1.0;
+    }
+
     TrustGateConfig config_;
+    bool valid_config_;
 };
 
 } // namespace ev

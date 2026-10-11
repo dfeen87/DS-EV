@@ -203,3 +203,20 @@ Snapshots are appended to `logs/ailee_learning_audit.json` for machine analysis 
 ---
 
 *This specification serves as the formal architectural blueprint for all AILEE Trust Layer EV integrations.*
+
+## Reference implementation contract after recovery/learning remediation
+
+The implementation evidence and bounded compatibility contract are recorded in
+[RECOVERY_LEARNING_AUDIT_REMEDIATION.md](RECOVERY_LEARNING_AUDIT_REMEDIATION.md).
+The preceding production/OTA/automatic-baseline descriptions are design targets,
+not proof of implemented control paths or authorization to distribute parameters.
+The implemented reference gate preserves configurable ordered thresholds,
+inclusive equality and `noexcept` entry points; malformed policy and scores deny
+authorization. Learning snapshots authorize only their originating local target
+lifetime. Parameter names do not establish identity across compartments.
+
+The reference LearningEngine separates rejected-operation audit evidence from
+committed parameter history. It does not provide persistent/distributed target
+registration, audit authentication, or production control-loop integration.
+Integrators must follow the report's target lifetime, ownership and ABI limits.
+No automatic baseline restore or fleet/OTA path is established by these changes.
