@@ -191,6 +191,16 @@ if(DS_BUILD_TESTS)
     add_test(NAME test_middleware COMMAND test_middleware)
     ds_enable_test_assertions(test_middleware)
 
+    add_executable(test_middleware_accounting tests/test_middleware_accounting.cpp)
+    target_link_libraries(test_middleware_accounting PRIVATE ds_battery)
+    add_test(NAME test_middleware_accounting COMMAND test_middleware_accounting)
+    ds_enable_test_assertions(test_middleware_accounting)
+
+    add_executable(test_middleware_configuration tests/test_middleware_configuration.cpp)
+    target_link_libraries(test_middleware_configuration PRIVATE ds_battery)
+    add_test(NAME test_middleware_configuration COMMAND test_middleware_configuration)
+    ds_enable_test_assertions(test_middleware_configuration)
+
     add_executable(test_hardware_adapter tests/test_hardware_adapter.cpp)
     target_link_libraries(test_hardware_adapter PRIVATE ds_battery)
     add_test(NAME test_hardware_adapter COMMAND test_hardware_adapter)

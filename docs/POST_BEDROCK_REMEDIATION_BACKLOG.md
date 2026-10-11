@@ -15,6 +15,11 @@ with phase-specific evidence in [STATE_INTEGRITY_REMEDIATION.md](STATE_INTEGRITY
 Resolved entries retain their original reproduction evidence; tests on other entries remain
 requirements for subsequent work, not reported passing tests.
 
+The numerical/middleware/fallback phase resolves PB-13 through PB-15, with
+regression-first measurements, accounting/configuration contracts and software
+verification in [NUMERICAL_MIDDLEWARE_FALLBACK_REMEDIATION.md](NUMERICAL_MIDDLEWARE_FALLBACK_REMEDIATION.md).
+PB-09 through PB-12 remain open; v8.0.2 is still a consolidated development target.
+
 Severity describes the software boundary and potential consequence. Physical
 consequences have not been verified. Reproductions use synthetic in-process values
 and, where applicable, a fake CAN transport; no hardware commands are needed.
@@ -166,7 +171,7 @@ compatible where possible. Add failing regressions before each correction.
 - **Required regressions:** Older-handle rollback after later updates; parse every emitted line; quotes, backslashes, control characters, NaN/infinity rejection, and alias consistency.
 - **Dependencies:** PB-10 target validation; document any serialization-schema additions. Cryptographic audit authentication is a separate limitation, not established by these tests.
 
-## PB-13 — Raw-current energy ledger can overflow while model stability passes
+## PB-13 — Raw-current energy ledger can overflow while model stability passes — resolved
 
 - **Severity / confidence:** Medium; confirmed.
 - **File / function:** `include/ds_bms_middleware_v2.hpp`, `ds_plugin::DSBMSMiddleware::enhance_cycle` energy-throughput accounting.
@@ -175,18 +180,20 @@ compatible where possible. Add failing regressions before each correction.
 - **Minimal correction:** Validate derived accounting values and use a clearly defined accepted/raw-energy contract; stage ledger changes so invalid arithmetic cannot poison cumulative diagnostics.
 - **Required regressions:** Extreme finite positive/negative current, long timestep overflow, normal energy units/signs, and preservation of diagnostics after rejected accounting.
 - **Dependencies:** Raw fault preservation must remain intact; align accepted battery-energy accounting with PB-09.
+- **Correction / evidence:** Raw electrical energy is credited only for accepted cycles; preflight validates W/kW/kWh, cumulative ledgers/throughput, seconds/milliseconds and checked integer counters. Copied core/filter candidates and complete diagnostic/result validation precede no-throw commit. Unsaturated core entropy/degradation guards prevent overflow hidden by saturation. Rejection retains accepted numerical state while reporting latest raw safety faults. New `test_middleware_accounting` covers extreme signs, units, cumulative overflow, counters/timing, full state/filter preservation, raw faults and finite telemetry. See the phase report for exact before/after measurements, verification, and scope limits. Legacy recovered-energy telemetry remains generic all-source charging; PB-09 must distinguish genuine recovery and stage its own history.
 
-## PB-14 — Advanced middleware exposes inconsistent nominal configuration
+## PB-14 — Advanced middleware exposes inconsistent nominal configuration — resolved
 
-- **Severity / confidence:** Medium; numerical mismatch confirmed; the intended configuration-authority defect is suspected pending clarification of precedence.
+- **Severity / confidence:** Medium; mismatch and partially replaced failed-reinitialization instance confirmed; authority resolved by an explicit agreement contract.
 - **File / function:** `include/ds_bms_middleware_v2.hpp`, `ds_plugin::DSBMSMiddleware::init_advanced` and `MiddlewareConfig`.
 - **Reproduction:** Set outer nominal capacity `150 Ah`, nominal voltage `800 V`, leaving embedded `ds_config` at defaults `75 Ah`/`400 V`. After initialization, `enhance_cycle(360,10,25,0.5,1)` gives `energy_psi=4.86e7 J` rather than the outer-capacity value `9.72e7 J`, and charging recommendation voltage `400 V`.
 - **Impact / invariant:** A caller can configure conflicting nominal values without rejection or explicit indication of which values own DS mathematics and charging recommendations. The mismatch is demonstrated; the intended authority needs a documented contract.
 - **Minimal correction:** Define one authoritative nominal configuration or reject inconsistency. Forward/synchronize only after that precedence is established; avoid silently changing calibrated DS inputs.
 - **Required regressions:** Matching defaults, matching nondefaults, conflicting capacity/voltage, and energy/charging outputs that follow the documented authority.
 - **Dependencies:** Resolve configuration ownership first; preserve historical BEDROCK evidence and valid existing DS calibration behavior.
+- **Correction / evidence:** Advanced outer/embedded nominal values must agree exactly; mismatches reject without rewriting calibration. Initialization validates nominal/derived constants, DS parameters and safety thresholds, then stages all components. Failed reinitialization preserves the previous complete instance; successful initialization resets session state and removes disabled components. Simple initialization synchronizes nominal arguments and preserves established non-nominal DS calibration. New `test_middleware_configuration` has 10 cases covering default/custom direct-core parity, conflicts, invalid/unsafe derived configuration, and failed/successful reinitialization with optional history. Matching 150 Ah/800 V produces `97200000 J` and an `800 V` recommendation. Existing CUSTOM pack chemistry remains unsupported. See the phase report for compatibility changes and verification.
 
-## PB-15 — Separate Python fallback accepts invalid timestep and SOC
+## PB-15 — Separate Python fallback accepts invalid timestep and SOC — resolved
 
 - **Severity / confidence:** High; confirmed in the approximate Python fallback, not the C++ model.
 - **File / function:** `ds_core/python_fallback/ds_enhancer_fallback.py`, `DSEnhancerFallback.enhance_cycle`.
@@ -195,6 +202,7 @@ compatible where possible. Add failing regressions before each correction.
 - **Minimal correction:** Validate finite inputs and documented physical/timestep domains, calculate candidate fallback state, and commit only after all owned postconditions pass.
 - **Required regressions:** Zero/negative/nonfinite timestep, NaN/infinite SOC and consumed sensors, extreme finite arithmetic, rejected-cycle atomicity, and existing valid fallback behavior.
 - **Dependencies:** Keep fallback validation independent of repaired automotive-governor validation; document its model and software-validation limits.
+- **Correction / evidence:** Validate finite real inputs, positive voltage/timestep, physically possible temperature, nominal configuration and usable parameters before mutation. Compute and validate unsaturated accumulators, intermediates and complete results in candidate locals; commit all five owned accumulators only after acceptance. Rejection raises `ValueError`, returns no success and preserves the complete instance dictionary. New `test_fallback_integrity.py` has 21 passing methods; both original reproductions first failed `ValueError not raised`. A deterministic 2,000-cycle compatibility probe matched baseline results and state exactly. The fallback remains a separate approximate model without certified C++ equivalence. See the phase report for full measurements, commands and verification.
 
 ## Architecture and assurance limits
 
